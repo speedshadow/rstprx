@@ -1,0 +1,159 @@
+# Elite Rama Proxy - Configuration
+# Version: 1.0.0 - 2026 Advanced Stealth
+
+server:
+  listen_addr: "0.0.0.0:8443"
+  admin_path: "/admin_elite"
+  fake_website_enabled: true
+  fake_website_type: "construction"  # Options: construction, maintenance, nginx, apache
+  
+  tls:
+    enabled: true
+    mode: "selfsigned"
+    cert_file: "certs/cert.pem"
+    key_file: "certs/key.pem"
+    cert_dir: "certs/domains"
+    selfsigned_hosts: ["localhost", "127.0.0.1", "*.local"]
+    
+    autocert:
+      enabled: false
+      domains: []
+      email: ""
+      cache_dir: "certs/autocert"
+    
+    ja3_spoofing:
+      enabled: true
+      profile: "random"
+      custom_ja3: ""
+    
+    ja4_spoofing:
+      enabled: true
+      profile: "chrome_120"
+  
+  timeouts:
+    read: 30
+    write: 30
+    idle: 120
+    shutdown: 30
+
+proxy:
+  transport:
+    max_idle_conns: 2000
+    max_idle_conns_per_host: 100
+    idle_conn_timeout: 90
+    tls_handshake_timeout: 10
+    expect_continue_timeout: 1
+    response_header_timeout: 30
+    dial_timeout: 10
+    keep_alive: 30
+  
+  profiles:
+    enabled: true
+    rotation: "random"
+    browsers:
+      - "chrome_120"
+      - "chrome_124"
+      - "chrome_131"
+      - "firefox_120"
+      - "firefox_133"
+      - "safari_17_2"
+      - "safari_18"
+      - "edge_120"
+  
+  streaming:
+    flush_interval: 1
+    buffer_size: 131072
+    chunk_size: 32768
+    
+  http2:
+    enabled: true
+    akamai_fingerprint: true
+    settings:
+      header_table_size: 65536
+      max_concurrent_streams: 1000
+      initial_window_size: 6291456
+      max_frame_size: 16384
+      max_header_list_size: 262144
+  
+  tcp_fingerprint:
+    enabled: true
+    window_size: 65535
+    ttl: 64
+    mss: 1460
+    window_scale: 8
+    timestamp: true
+    sack_permitted: true
+
+stealth:
+  behavioral_mimicry:
+    enabled: true
+    human_pattern: true
+    min_delay_ms: 50
+    max_delay_ms: 500
+    burst_threshold: 5
+    burst_delay_ms: 2000
+  
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+  
+  remove_headers:
+    - "X-Forwarded-For"
+    - "X-Forwarded-Host"
+    - "X-Forwarded-Proto"
+    - "X-Real-IP"
+    - "Via"
+    - "Forwarded"
+    - "X-Forwarded-Port"
+    - "X-Forwarded-Server"
+    - "X-Original-Forwarded-For"
+    - "CF-Connecting-IP"
+    - "True-Client-IP"
+  
+  header_order:
+    preserve: true
+    chrome_order: true
+
+rate_limit:
+  enabled: true
+  per_ip: 100
+  per_domain: 1000
+  burst: 20
+  cleanup_interval: 300
+
+circuit_breaker:
+  enabled: true
+  max_requests: 5
+  timeout: 60
+  interval: 10
+  failure_threshold: 0.6
+
+auth:
+  jwt_secret: "CHANGE_ME_PRODUCTION_SECRET_MINIMUM_32_CHARS_2026"
+  token_expiry: 86400
+  refresh_enabled: true
+  refresh_expiry: 604800
+  default_user: "admin"
+  default_password: "$argon2id$v=19$m=19456,t=2,p=1$CHANGE_ME"
+
+storage:
+  type: "sled"
+  path: "data/elite.db"
+  cache_capacity: 1024
+
+monitoring:
+  prometheus:
+    enabled: true
+    path: "/metrics"
+    auth_required: true
+  
+  tracing:
+    enabled: true
+    level: "info"
+    format: "json"
+    file: "logs/proxy.log"
+    anonymize_ips: true
+
+domains: {}

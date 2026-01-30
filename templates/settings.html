@@ -1,0 +1,247 @@
+<div class="space-y-6">
+    <h2 class="text-3xl font-bold">Settings</h2>
+
+    <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+        <h3 class="text-lg font-semibold mb-4 flex items-center">
+            <span class="text-2xl mr-2">🌐</span>
+            Primary Domain & SSL Certificate
+        </h3>
+
+        <div class="bg-gray-900 rounded-lg p-4 mb-4">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm text-gray-400">Current Access:</span>
+                <span class="text-sm font-mono text-cyber-400" id="current-domain">{{CURRENT_DOMAIN}}</span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-400">Certificate Status:</span>
+                <span class="text-sm" id="cert-status">{{CERT_STATUS}}</span>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-2">
+                    Primary Domain (Optional)
+                    <span class="text-xs text-gray-500 ml-2">Leave empty to use IP only</span>
+                </label>
+                <input type="text" id="primary-domain" placeholder="proxy.example.com"
+                    class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg focus:border-cyber-500 focus:outline-none"
+                    value="{{PRIMARY_DOMAIN}}" />
+                <p class="text-xs text-gray-500 mt-1">This domain will be used to access the admin panel</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-2">Certificate Type</label>
+                <div class="space-y-2">
+                    <label class="flex items-center p-3 bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-850">
+                        <input type="radio" name="cert_type" value="selfsigned" class="mr-3" {{SELFSIGNED_CHECKED}} />
+                        <div>
+                            <div class="font-medium">Self-Signed</div>
+                            <div class="text-xs text-gray-500">For development/testing (browser warnings)</div>
+                        </div>
+                    </label>
+                    <label class="flex items-center p-3 bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-850">
+                        <input type="radio" name="cert_type" value="acme" class="mr-3" {{ACME_CHECKED}} />
+                        <div>
+                            <div class="font-medium">ACME / Let's Encrypt</div>
+                            <div class="text-xs text-gray-500">Free, automatic SSL (recommended for production)</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div id="acme-config" style="display: {{ACME_DISPLAY}}">
+                <div class="bg-blue-900/20 border border-blue-700/50 rounded-lg p-4 mb-4">
+                    <h4 class="text-sm font-semibold mb-2 text-blue-300">📋 Requirements for ACME:</h4>
+                    <ul class="text-xs text-gray-400 space-y-1">
+                        <li>✓ Domain DNS A record pointing to this server</li>
+                        <li>✓ Port 80 (HTTP) must be open for validation</li>
+                        <li>✓ Domain must be publicly accessible</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-2">
+                        Email for Notifications
+                        <span class="text-xs text-gray-500 ml-2">Required for certificate renewal alerts</span>
+                    </label>
+                    <input type="email" id="acme-email" placeholder="admin@example.com"
+                        class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg focus:border-cyber-500 focus:outline-none"
+                        value="{{ACME_EMAIL}}" />
+                </div>
+            </div>
+
+            <div class="flex space-x-3">
+                <button onclick="testDNS()"
+                    class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">
+                    🔍 Test DNS
+                </button>
+                <button onclick="generateCertificate()"
+                    class="flex-1 px-6 py-2 bg-cyber-500 hover:bg-cyber-600 text-white rounded-lg transition-colors font-semibold">
+                    🔒 Generate SSL Certificate
+                </button>
+            </div>
+
+            <div id="ssl-status" class="hidden mt-4"></div>
+        </div>
+    </div>
+
+    <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+        <h3 class="text-lg font-semibold mb-4">TLS Configuration</h3>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-2">Listen Address</label>
+                <input type="text" value="0.0.0.0:8443"
+                    class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg" />
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+        <h3 class="text-lg font-semibold mb-4">Stealth Features</h3>
+        <div class="space-y-3">
+            <label class="flex items-center justify-between">
+                <span class="text-sm text-gray-400">JA3/JA4 Spoofing</span>
+                <input type="checkbox" checked class="w-5 h-5 rounded bg-gray-900 border-gray-700" />
+            </label>
+            <label class="flex items-center justify-between">
+                <span class="text-sm text-gray-400">Behavioral Mimicry</span>
+                <input type="checkbox" checked class="w-5 h-5 rounded bg-gray-900 border-gray-700" />
+            </label>
+            <label class="flex items-center justify-between">
+                <span class="text-sm text-gray-400">User Agent Rotation</span>
+                <input type="checkbox" checked class="w-5 h-5 rounded bg-gray-900 border-gray-700" />
+            </label>
+        </div>
+    </div>
+
+    <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+        <h3 class="text-lg font-semibold mb-4">Rate Limiting</h3>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-2">Requests per Second</label>
+                <input type="number" value="100"
+                    class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg" />
+            </div>
+        </div>
+    </div>
+
+    <button class="px-6 py-3 bg-cyber-500 hover:bg-cyber-600 text-white rounded-lg transition-colors">
+        Save Settings
+    </button>
+</div>
+
+<script>
+    // Show/hide ACME config based on certificate type
+    document.querySelectorAll('input[name="cert_type"]').forEach(radio => {
+        radio.addEventListener('change', function () {
+            const acmeConfig = document.getElementById('acme-config');
+            if (this.value === 'acme') {
+                acmeConfig.style.display = 'block';
+            } else {
+                acmeConfig.style.display = 'none';
+            }
+        });
+    });
+
+    // Test DNS configuration
+    async function testDNS() {
+        const domain = document.getElementById('primary-domain').value.trim();
+
+        if (!domain) {
+            showStatus('⚠️ Please enter a domain first', 'warning');
+            return;
+        }
+
+        showStatus('🔍 Testing DNS configuration...', 'info');
+
+        try {
+            const response = await fetch('/admin_elite/api/test-dns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domain })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showStatus(`✅ DNS OK! ${domain} points to this server`, 'success');
+            } else {
+                showStatus(`❌ DNS Error: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            showStatus('❌ Test failed: ' + error.message, 'error');
+        }
+    }
+
+    // Generate SSL certificate
+    async function generateCertificate() {
+        const domain = document.getElementById('primary-domain').value.trim();
+        const certType = document.querySelector('input[name="cert_type"]:checked').value;
+        const email = document.getElementById('acme-email').value.trim();
+
+        // Validation
+        if (!domain) {
+            showStatus('⚠️ Please enter a primary domain', 'warning');
+            return;
+        }
+
+        if (certType === 'acme' && !email) {
+            showStatus('⚠️ Email is required for ACME certificates', 'warning');
+            return;
+        }
+
+        if (certType === 'acme' && !email.includes('@')) {
+            showStatus('⚠️ Please enter a valid email address', 'warning');
+            return;
+        }
+
+        showStatus('⏳ Generating certificate... This may take 30-60 seconds', 'info');
+
+        try {
+            const response = await fetch('/admin_elite/api/generate-certificate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    domain: domain,
+                    cert_type: certType,
+                    email: email
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showStatus(`✅ Certificate generated successfully! You can now access: https://${domain}:8443/admin_elite`, 'success');
+
+                // Reload page after 3 seconds to show new certificate
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+            } else {
+                showStatus(`❌ Failed: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            showStatus('❌ Generation failed: ' + error.message, 'error');
+        }
+    }
+
+    // Show status message
+    function showStatus(message, type) {
+        const statusDiv = document.getElementById('ssl-status');
+        statusDiv.className = 'p-4 rounded-lg mt-4';
+
+        if (type === 'success') {
+            statusDiv.className += ' bg-green-900/30 border border-green-700/50 text-green-300';
+        } else if (type === 'error') {
+            statusDiv.className += ' bg-red-900/30 border border-red-700/50 text-red-300';
+        } else if (type === 'warning') {
+            statusDiv.className += ' bg-yellow-900/30 border border-yellow-700/50 text-yellow-300';
+        } else {
+            statusDiv.className += ' bg-blue-900/30 border border-blue-700/50 text-blue-300';
+        }
+
+        statusDiv.innerHTML = message;
+        statusDiv.classList.remove('hidden');
+    }
+</script>

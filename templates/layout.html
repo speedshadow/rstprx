@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}} - Elite Rama Proxy</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        .cyber-400 {
+            color: #14c9f0;
+        }
+
+        .bg-cyber-500 {
+            background-color: #00add6;
+        }
+
+        .hover\:bg-cyber-600:hover {
+            background-color: #0389b4;
+        }
+
+        .text-cyber-400 {
+            color: #14c9f0;
+        }
+
+        .border-cyber-400 {
+            border-color: #14c9f0;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-950 text-gray-100 antialiased">
+    <div class="flex h-screen overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-gray-950 border-r border-gray-800 flex flex-col">
+            <div class="p-6 border-b border-gray-800">
+                <h1
+                    class="text-2xl font-bold bg-gradient-to-r from-cyber-400 to-purple-500 bg-clip-text text-transparent">
+                    Elite Rama Proxy
+                </h1>
+                <p class="text-xs text-gray-500 mt-1">Rust Edition v1.0.0</p>
+            </div>
+            <nav class="flex-1 p-4 space-y-1">
+                <a href="/admin"
+                    class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gray-800 transition-colors group">
+                    <i data-lucide="activity" class="w-5 h-5 text-gray-400 group-hover:text-cyber-400"></i>
+                    <span class="font-medium">Dashboard</span>
+                </a>
+                <a href="/admin/domains"
+                    class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gray-800 transition-colors group">
+                    <i data-lucide="globe" class="w-5 h-5 text-gray-400 group-hover:text-cyber-400"></i>
+                    <span class="font-medium">Domains</span>
+                </a>
+                <a href="/admin/settings"
+                    class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gray-800 transition-colors group">
+                    <i data-lucide="settings" class="w-5 h-5 text-gray-400 group-hover:text-cyber-400"></i>
+                    <span class="font-medium">Settings</span>
+                </a>
+                <a href="/admin/stats"
+                    class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gray-800 transition-colors group">
+                    <i data-lucide="bar-chart-3" class="w-5 h-5 text-gray-400 group-hover:text-cyber-400"></i>
+                    <span class="font-medium">Statistics</span>
+                </a>
+                <a href="/admin/certificates"
+                    class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gray-800 transition-colors group">
+                    <i data-lucide="shield-check" class="w-5 h-5 text-gray-400 group-hover:text-cyber-400"></i>
+                    <span class="font-medium">Certificates</span>
+                </a>
+            </nav>
+            <div class="p-4 border-t border-gray-800">
+                <div class="flex items-center space-x-3 px-4 py-3">
+                    <div
+                        class="w-8 h-8 bg-gradient-to-br from-cyber-400 to-purple-500 rounded-full flex items-center justify-center">
+                        <span class="text-sm font-bold">A</span>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium">Admin</p>
+                        <p class="text-xs text-gray-500">elite@proxy.local</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto bg-gray-900">
+            <div class="container mx-auto px-6 py-8">
+                {{CONTENT}}
+            </div>
+        </main>
+    </div>
+    <script>
+        lucide.createIcons();
+        document.body.addEventListener('htmx:afterSwap', () => lucide.createIcons());
+    </script>
+</body>
+
+</html>

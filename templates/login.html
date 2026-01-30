@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Elite Rama Proxy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        .cyber-400 { color: #14c9f0; }
+        .bg-cyber-500 { background-color: #00add6; }
+        .hover\:bg-cyber-600:hover { background-color: #0389b4; }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 antialiased">
+    <div class="min-h-screen flex items-center justify-center px-4">
+        <div class="max-w-md w-full space-y-8">
+            <!-- Logo/Title -->
+            <div class="text-center">
+                <div class="flex justify-center mb-4">
+                    <i data-lucide="shield-check" class="w-16 h-16 text-cyber-400"></i>
+                </div>
+                <h2 class="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
+                    Elite Rama Proxy
+                </h2>
+                <p class="mt-2 text-sm text-gray-400">Admin Dashboard Access</p>
+            </div>
+
+            <!-- Error Message -->
+            <div id="error-message" class="hidden bg-red-900/20 border border-red-500 text-red-400 px-4 py-3 rounded-lg" role="alert">
+                <div class="flex items-center">
+                    <i data-lucide="alert-circle" class="w-5 h-5 mr-2"></i>
+                    <span id="error-text">Invalid credentials</span>
+                </div>
+            </div>
+
+            <!-- Login Form -->
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl p-8">
+                <form id="login-form" class="space-y-6">
+                    <!-- Username -->
+                    <div>
+                        <label for="username" class="block text-sm font-medium text-gray-300 mb-2">
+                            Username
+                        </label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <i data-lucide="user" class="w-5 h-5 text-gray-500"></i>
+                            </div>
+                            <input 
+                                type="text" 
+                                id="username" 
+                                name="username" 
+                                required
+                                autocomplete="username"
+                                class="block w-full pl-10 pr-3 py-3 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                                placeholder="admin"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Password -->
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-300 mb-2">
+                            Password
+                        </label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <i data-lucide="lock" class="w-5 h-5 text-gray-500"></i>
+                            </div>
+                            <input 
+                                type="password" 
+                                id="password" 
+                                name="password" 
+                                required
+                                autocomplete="current-password"
+                                class="block w-full pl-10 pr-3 py-3 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+                                placeholder="••••••••"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Remember Me (future feature) -->
+                    <div class="flex items-center">
+                        <input 
+                            id="remember" 
+                            type="checkbox" 
+                            class="w-4 h-4 bg-gray-800 border-gray-700 rounded focus:ring-cyan-500"
+                        >
+                        <label for="remember" class="ml-2 block text-sm text-gray-400">
+                            Remember me
+                        </label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button 
+                        type="submit" 
+                        id="submit-btn"
+                        class="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg text-sm font-medium text-white bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 transition-all duration-200"
+                    >
+                        <i data-lucide="log-in" class="w-5 h-5 mr-2"></i>
+                        <span id="submit-text">Sign In</span>
+                    </button>
+                </form>
+
+                <!-- Footer -->
+                <div class="mt-6 text-center">
+                    <p class="text-xs text-gray-500">
+                        Protected by enterprise-grade encryption
+                    </p>
+                </div>
+            </div>
+
+            <!-- Security Notice -->
+            <div class="text-center text-xs text-gray-600">
+                <p>🔒 All traffic is encrypted with TLS 1.3</p>
+                <p class="mt-1">Unauthorized access is monitored and logged</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        const form = document.getElementById('login-form');
+        const errorDiv = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+        const submitBtn = document.getElementById('submit-btn');
+        const submitText = document.getElementById('submit-text');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Disable button
+            submitBtn.disabled = true;
+            submitText.textContent = 'Authenticating...';
+
+            // Hide previous errors
+            errorDiv.classList.add('hidden');
+
+            // Get form data
+            const formData = new FormData(form);
+            const username = formData.get('username');
+            const password = formData.get('password');
+
+            try {
+                const response = await fetch('/admin_elite/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.ok) {
+                    // Redirect to dashboard
+                    window.location.href = '/admin_elite';
+                } else {
+                    const data = await response.json().catch(() => ({ error: 'Authentication failed' }));
+                    showError(data.error || 'Invalid username or password');
+                }
+            } catch (error) {
+                showError('Connection error. Please try again.');
+            } finally {
+                submitBtn.disabled = false;
+                submitText.textContent = 'Sign In';
+                lucide.createIcons();
+            }
+        });
+
+        function showError(message) {
+            errorText.textContent = message;
+            errorDiv.classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        // Auto-focus username field
+        document.getElementById('username').focus();
+    </script>
+</body>
+</html>

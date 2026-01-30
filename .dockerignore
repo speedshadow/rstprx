@@ -1,0 +1,13 @@
+target/
+data/
+logs/
+certs/*.pem
+certs/*.key
+.env
+.git/
+.gitignore
+*.log
+*.db
+node_modules/
+frontend/dist/
+frontend/node_modules/
