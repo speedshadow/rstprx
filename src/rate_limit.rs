@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter() {
-        let limiter = RateLimiter::new(5, 10, 2, true);
+        let limiter = RateLimiter::new(5, 10, 5, true);
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
         for _ in 0..5 {

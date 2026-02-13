@@ -6,42 +6,58 @@ use std::path::{Path, PathBuf};
 pub struct PathSanitizer;
 
 impl PathSanitizer {
-    /// Sanitiza e valida path para prevenir path traversal
-    pub fn sanitize(path: &str) -> Result<PathBuf> {
-        // Check 1: Rejeitar paths absolutos
-        let path_buf = PathBuf::from(path);
-        if path_buf.is_absolute() {
-            return Err(Error::Security(
-                "Absolute paths are not allowed for security reasons".to_string()
-            ));
+    fn validated_relative_path(path: &str) -> Result<PathBuf> {
+        if path.is_empty() {
+            return Err(Error::Security("Path must not be empty".to_string()));
         }
 
-        // Check 2: Rejeitar .. (parent directory)
-        if path.contains("..") {
-            return Err(Error::Security(
-                "Path traversal attempt detected (..)".to_string()
-            ));
-        }
-
-        // Check 3: Rejeitar ~ (home directory)
         if path.contains('~') {
             return Err(Error::Security(
-                "Home directory expansion (~) is not allowed".to_string()
+                "Home directory expansion (~) is not allowed".to_string(),
             ));
         }
 
-        // Check 4: Rejeitar null bytes
         if path.contains('\0') {
-            return Err(Error::Security(
-                "Null byte injection detected".to_string()
-            ));
+            return Err(Error::Security("Null byte injection detected".to_string()));
         }
 
-        // Check 5: Canonicalize para resolver symlinks
+        let mut relative = PathBuf::new();
+        for component in Path::new(path).components() {
+            match component {
+                std::path::Component::Normal(segment) => relative.push(segment),
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    return Err(Error::Security(
+                        "Path traversal attempt detected (..)".to_string(),
+                    ));
+                }
+                std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                    return Err(Error::Security(
+                        "Absolute paths are not allowed for security reasons".to_string(),
+                    ));
+                }
+            }
+        }
+
+        if relative.as_os_str().is_empty() {
+            return Err(Error::Security("Path must not be empty".to_string()));
+        }
+
+        Ok(relative)
+    }
+
+    /// Sanitiza e valida path para prevenir path traversal
+    pub fn sanitize(path: &str) -> Result<PathBuf> {
+        let relative = Self::validated_relative_path(path)?;
+
+        // Canonicalize para resolver symlinks
         let current_dir = std::env::current_dir()
             .map_err(|e| Error::Internal(format!("Failed to get current directory: {}", e)))?;
+        let current_dir = current_dir
+            .canonicalize()
+            .map_err(|e| Error::Internal(format!("Failed to canonicalize working directory: {}", e)))?;
         
-        let full_path = current_dir.join(&path_buf);
+        let full_path = current_dir.join(relative);
         
         // Canonicalize detecta symlinks maliciosos
         let canonical = full_path.canonicalize()
@@ -51,6 +67,37 @@ impl PathSanitizer {
         if !canonical.starts_with(&current_dir) {
             return Err(Error::Security(
                 "Path escapes working directory".to_string()
+            ));
+        }
+
+        Ok(canonical)
+    }
+
+    /// Sanitiza diretório e cria se não existir (sem exigir preexistência)
+    pub fn sanitize_or_create_dir(path: &str) -> Result<PathBuf> {
+        let relative = Self::validated_relative_path(path)?;
+
+        let current_dir = std::env::current_dir()
+            .map_err(|e| Error::Internal(format!("Failed to get current directory: {}", e)))?;
+        let current_dir = current_dir
+            .canonicalize()
+            .map_err(|e| Error::Internal(format!("Failed to canonicalize working directory: {}", e)))?;
+
+        let full_path = current_dir.join(relative);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| Error::Internal(format!("Failed to create path parent: {}", e)))?;
+        }
+        std::fs::create_dir_all(&full_path)
+            .map_err(|e| Error::Internal(format!("Failed to create directory: {}", e)))?;
+
+        let canonical = full_path
+            .canonicalize()
+            .map_err(|e| Error::Security(format!("Path canonicalization failed: {}", e)))?;
+
+        if !canonical.starts_with(&current_dir) {
+            return Err(Error::Security(
+                "Path escapes working directory".to_string(),
             ));
         }
 

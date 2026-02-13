@@ -1,0 +1,66 @@
+
+## Comandos para “reiniciar tudo” (Rama Proxy)
+
+### 1) Reinício simples do serviço
+```bash
+sudo systemctl restart rama-proxy
+sudo systemctl status rama-proxy --no-pager -l
+```
+
+### 2) Reinício “limpo” (parar, esperar, iniciar)
+```bash
+sudo systemctl stop rama-proxy
+sleep 2
+sudo systemctl start rama-proxy
+sudo systemctl status rama-proxy --no-pager -l
+```
+
+### 3) Verificar se está a ouvir na porta 443/80
+```bash
+sudo ss -lntp | grep -E ':(80|443)\b' || true
+```
+
+### 4) Ver logs (para ver porque caiu / restart loop)
+```bash
+sudo journalctl -u rama-proxy -n 200 --no-pager
+sudo tail -n 200 /opt/rama-proxy/logs/stderr.log
+sudo tail -n 200 /opt/rama-proxy/logs/stdout.log
+```
+
+### 5) Teste local e teste pelo IP público
+```bash
+curl -vk --max-time 10 https://127.0.0.1/admin_elite/ | head
+curl -vk --max-time 10 https://94.103.173.12/admin_elite/ | head
+```
+
+### 6) (Só se voltar o erro de porta 443 “Permission denied”) aplicar permissão e reiniciar
+```bash
+# dar permissão ao binário para bind em 443 sem rodar como root
+sudo setcap 'cap_net_bind_service=+ep' /opt/rama-proxy/bin/rama-elite-proxy
+sudo getcap /opt/rama-proxy/bin/rama-elite-proxy
+
+sudo systemctl restart rama-proxy
+sudo ss -lntp | grep -E ':443\b' || true
+```
+
+### 7) (Opcional) Rebuild + deploy do binário + restart (igual ao que fizemos)
+```bash
+# build leve
+cd /root/CascadeProjects/rstprx
+export CARGO_BUILD_JOBS=1
+export RUSTFLAGS='-C debuginfo=0'
+cargo build --release -j 1
+
+# parar serviço, trocar binário, garantir perms/cap, subir
+sudo systemctl stop rama-proxy
+ts=$(date +%Y%m%d-%H%M%S)
+sudo cp -a /opt/rama-proxy/bin/rama-elite-proxy "/opt/rama-proxy/bin/rama-elite-proxy.bak-${ts}"
+sudo install -m 0755 -o rama-proxy -g rama-proxy target/release/rama-elite-proxy /opt/rama-proxy/bin/rama-elite-proxy
+sudo setcap 'cap_net_bind_service=+ep' /opt/rama-proxy/bin/rama-elite-proxy
+
+sudo systemctl start rama-proxy
+sudo systemctl status rama-proxy --no-pager -l
+```
+
+## Status
+- **Concluído**: lista completa de comandos para reiniciar/validar/logs e (se precisares) rebuild+redeploy.

@@ -4,6 +4,8 @@ use prometheus::{Counter, CounterVec, Gauge, HistogramVec, Opts, Registry, TextE
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+const MAX_TRACKED_DOMAINS: usize = 10_000;
+
 #[derive(Clone)]
 pub struct MetricsCollector {
     registry: Arc<Registry>,
@@ -102,27 +104,16 @@ impl MetricsCollector {
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
-        self.domain_stats
-            .entry(domain.to_string())
-            .or_insert_with(DomainStatsInternal::default)
-            .value()
-            .requests
-            .fetch_add(1, Ordering::Relaxed);
+        // Evict oldest domain if we've hit the limit (prevent unbounded memory growth)
+        self.evict_oldest_domain();
 
-        self.domain_stats
-            .get(domain)
-            .unwrap()
-            .bytes
-            .fetch_add(bytes, Ordering::Relaxed);
-
-        self.domain_stats
-            .get(domain)
-            .unwrap()
-            .last_request
-            .store(now, Ordering::Relaxed);
+        let entry = self.domain_stats.entry(domain.to_string()).or_default();
+        entry.requests.fetch_add(1, Ordering::Relaxed);
+        entry.bytes.fetch_add(bytes, Ordering::Relaxed);
+        entry.last_request.store(now, Ordering::Relaxed);
     }
 
     pub fn record_error(&self, domain: &str, error_type: &str) {
@@ -132,7 +123,7 @@ impl MetricsCollector {
 
         self.domain_stats
             .entry(domain.to_string())
-            .or_insert_with(DomainStatsInternal::default)
+            .or_default()
             .value()
             .errors
             .fetch_add(1, Ordering::Relaxed);
@@ -190,6 +181,39 @@ impl MetricsCollector {
         let encoder = TextEncoder::new();
         let metric_families = self.registry.gather();
         encoder.encode_to_string(&metric_families)
+    }
+
+    pub fn cleanup_stale_domains(&self, max_age_secs: u64) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let stale_keys: Vec<String> = self.domain_stats.iter()
+            .filter(|entry| {
+                let last = entry.value().last_request.load(Ordering::Relaxed);
+                last > 0 && now - last > max_age_secs
+            })
+            .map(|entry| entry.key().clone())
+            .collect();
+
+        for key in stale_keys {
+            self.domain_stats.remove(&key);
+        }
+    }
+
+    fn evict_oldest_domain(&self) {
+        if self.domain_stats.len() <= MAX_TRACKED_DOMAINS {
+            return;
+        }
+
+        let oldest = self.domain_stats.iter()
+            .min_by_key(|entry| entry.value().last_request.load(Ordering::Relaxed))
+            .map(|entry| entry.key().clone());
+
+        if let Some(key) = oldest {
+            self.domain_stats.remove(&key);
+        }
     }
 }
 

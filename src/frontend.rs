@@ -1,5 +1,6 @@
 use crate::auth::AuthManager;
 use crate::auth_middleware::SessionManager;
+use crate::acme::AcmeClient;
 use crate::config::Config;
 use crate::metrics::MetricsCollector;
 use crate::storage::Storage;
@@ -8,6 +9,7 @@ use bytes::Bytes;
 use http::{Request, Response, StatusCode};
 use http_body_util::Full;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use serde::Deserialize;
@@ -16,7 +18,7 @@ use serde::Deserialize;
 pub struct FrontendHandler {
     config: Arc<Config>,
     storage: Storage,
-    auth: Arc<AuthManager>,
+    _auth: Arc<AuthManager>,
     metrics: Arc<MetricsCollector>,
     tls_manager: Arc<TlsManager>,
     session_manager: Arc<SessionManager>,
@@ -37,11 +39,44 @@ impl FrontendHandler {
         Self {
             config,
             storage,
-            auth,
+            _auth: auth,
             metrics,
             tls_manager,
             session_manager,
             admin_path,
+        }
+    }
+
+    fn api_delete_domain(&self, subdomain_raw: &str) -> Response<Full<Bytes>> {
+        let subdomain = match urlencoding::decode(subdomain_raw) {
+            Ok(decoded) => decoded.to_string(),
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(Bytes::from("Invalid domain")))
+                    .unwrap()
+            }
+        };
+
+        if subdomain.is_empty() {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Full::new(Bytes::from("Domain required")))
+                .unwrap();
+        }
+
+        match self.storage.delete_domain(&subdomain) {
+            Ok(_) => {
+                self.tls_manager.remove_cert(&subdomain);
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap()
+            }
+            Err(_) => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Full::new(Bytes::from("Domain not found")))
+                .unwrap(),
         }
     }
 
@@ -50,6 +85,7 @@ impl FrontendHandler {
         B: http_body_util::BodyExt + Send + 'static,
     {
         let path = req.uri().path();
+        let metrics_path = self.config.monitoring.prometheus.path.as_str();
         
         // Normalizar path: remover trailing slash exceto root
         let normalized_path = if path.len() > 1 && path.ends_with('/') {
@@ -60,10 +96,23 @@ impl FrontendHandler {
 
         // Check if accessing admin area
         let admin_base = &self.admin_path;
-        let is_admin_area = normalized_path.starts_with(admin_base) && normalized_path != &format!("{}/login", admin_base);
+        let is_admin_area = normalized_path.starts_with(admin_base) && normalized_path != format!("{}/login", admin_base);
         
-        // Auth check for protected routes
-        if is_admin_area && !self.session_manager.is_authenticated(&req) {
+        // Auth check for protected routes (admin + API + metrics)
+        let metrics_requires_auth = self.config.monitoring.prometheus.enabled
+            && self.config.monitoring.prometheus.auth_required
+            && normalized_path == metrics_path;
+        let is_protected_api = normalized_path.starts_with("/api/") || metrics_requires_auth;
+        
+        if (is_admin_area || is_protected_api) && !self.session_manager.is_authenticated(&req) {
+            // For API/metrics, return 401 instead of redirect
+            if is_protected_api {
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .header("Content-Type", "application/json")
+                    .body(Full::new(Bytes::from("{\"error\": \"Unauthorized\"}"))) 
+                    .unwrap();
+            }
             warn!("Unauthorized access attempt to: {}", normalized_path);
             return self.redirect_to_login();
         }
@@ -76,17 +125,20 @@ impl FrontendHandler {
         match (req.method(), normalized_path) {
             (&http::Method::GET, p) if p == dashboard_path || p == "/" => {
                 if p == "/" && !self.session_manager.is_authenticated(&req) {
-                    return self.page_fake_maintenance();
+                    if self.config.server.fake_website_enabled {
+                        return self.page_fake_maintenance();
+                    }
+                    return self.redirect_to_login();
                 }
                 self.page_dashboard()
             },
             (&http::Method::GET, p) if p == login_path => self.page_login(),
             (&http::Method::POST, p) if p == api_login_path => self.api_login(req).await,
-            (&http::Method::GET, p) if p == "/logout" || p == &format!("{}/logout", admin_base) => self.logout(),
-            (&http::Method::GET, p) if p == &format!("{}/domains", admin_base) => self.page_domains(),
-            (&http::Method::GET, p) if p == &format!("{}/settings", admin_base) => self.page_settings(),
-            (&http::Method::GET, p) if p == &format!("{}/stats", admin_base) => self.page_stats(),
-            (&http::Method::GET, p) if p == &format!("{}/certificates", admin_base) => self.page_certificates(),
+            (&http::Method::GET, p) if p == "/logout" || p == format!("{}/logout", admin_base) => self.logout(),
+            (&http::Method::GET, p) if p == format!("{}/domains", admin_base) => self.page_domains(),
+            (&http::Method::GET, p) if p == format!("{}/settings", admin_base) => self.page_settings(),
+            (&http::Method::GET, p) if p == format!("{}/stats", admin_base) => self.page_stats(),
+            (&http::Method::GET, p) if p == format!("{}/certificates", admin_base) => self.page_certificates(),
             (&http::Method::GET, "/health") => self.health(),
             (&http::Method::GET, "/api/stats") => self.api_stats(),
             (&http::Method::GET, "/api/stats/html") => self.api_stats_html(),
@@ -94,14 +146,22 @@ impl FrontendHandler {
             (&http::Method::GET, "/api/domains") => self.api_list_domains(),
             (&http::Method::GET, "/api/domains/html") => self.api_domains_html(),
             (&http::Method::POST, "/api/domains") => self.api_add_domain(req).await,
+            (&http::Method::DELETE, path) if path.starts_with("/api/domains/") => {
+                let subdomain = path.trim_start_matches("/api/domains/");
+                self.api_delete_domain(subdomain)
+            }
             (&http::Method::GET, "/api/certificates") => self.api_certificates(),
             (&http::Method::POST, path) if path.starts_with("/api/renew/") => {
                 let domain = path.trim_start_matches("/api/renew/");
                 self.api_renew_certificate(domain).await
             }
-            (&http::Method::POST, p) if p == &format!("{}/api/test-dns", admin_base) => self.api_test_dns(req).await,
-            (&http::Method::POST, p) if p == &format!("{}/api/generate-certificate", admin_base) => self.api_generate_certificate(req).await,
-            (&http::Method::GET, "/metrics") => self.metrics_endpoint(),
+            (&http::Method::POST, p) if p == format!("{}/api/test-dns", admin_base) => self.api_test_dns(req).await,
+            (&http::Method::POST, p) if p == format!("{}/api/generate-certificate", admin_base) => self.api_generate_certificate(req).await,
+            (&http::Method::GET, p)
+                if p == metrics_path && self.config.monitoring.prometheus.enabled =>
+            {
+                self.metrics_endpoint()
+            }
             _ => self.not_found(),
         }
     }
@@ -147,7 +207,7 @@ impl FrontendHandler {
         };
         
         // Get certificate status
-        let cert_status = if self.config.server.tls.mode == "acme" {
+        let cert_status = if self.config.server.tls.mode == "autocert" {
             "✅ ACME (Let's Encrypt)"
         } else {
             "⚠️ Self-signed"
@@ -164,7 +224,7 @@ impl FrontendHandler {
         let acme_email = &self.config.server.tls.autocert.email;
         
         // Determine which cert type is checked
-        let (selfsigned_checked, acme_checked, acme_display) = if self.config.server.tls.mode == "acme" {
+        let (selfsigned_checked, acme_checked, acme_display) = if self.config.server.tls.mode == "autocert" {
             ("", "checked", "block")
         } else {
             ("checked", "", "none")
@@ -178,7 +238,7 @@ impl FrontendHandler {
             .replace("{{SELFSIGNED_CHECKED}}", selfsigned_checked)
             .replace("{{ACME_CHECKED}}", acme_checked)
             .replace("{{ACME_DISPLAY}}", acme_display)
-            .replace("{{ACME_EMAIL}}", &acme_email);
+            .replace("{{ACME_EMAIL}}", acme_email);
         
         self.render_page("Settings", &content)
     }
@@ -396,12 +456,12 @@ impl FrontendHandler {
     fn health(&self) -> Response<Full<Bytes>> {
         let health = serde_json::json!({
             "status": "ok",
-            "version": env!("CARGO_PKG_VERSION"),
         });
 
         Response::builder()
             .status(StatusCode::OK)
             .header(http::header::CONTENT_TYPE, "application/json")
+            .header(http::header::SERVER, "nginx/1.24.0")
             .body(Full::new(Bytes::from(health.to_string())))
             .unwrap()
     }
@@ -785,6 +845,11 @@ impl FrontendHandler {
         let mut expiring = 0;
         let mut expired = 0;
 
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
         // Ler certificados do filesystem
         if cert_dir.exists() && cert_dir.is_dir() {
             if let Ok(entries) = fs::read_dir(cert_dir) {
@@ -794,9 +859,14 @@ impl FrontendHandler {
                         if let Some(domain) = path.file_stem().and_then(|s| s.to_str()) {
                             total += 1;
                             
-                            // Por agora, certificados self-signed têm validade de 365 dias
-                            // TODO: Parse real certificate expiry com x509-parser
-                            let days_remaining = 365; // Placeholder
+                            // Parse real certificate expiry from PEM/DER
+                            let (days_remaining, expiry_date) = match fs::read_to_string(&path) {
+                                Ok(pem_str) => {
+                                    Self::parse_cert_expiry(&pem_str, now)
+                                }
+                                Err(_) => (365, "Read error".to_string()),
+                            };
+
                             let status = if days_remaining < 0 {
                                 expired += 1;
                                 "Expired"
@@ -813,7 +883,7 @@ impl FrontendHandler {
                             certificates.push(json!({
                                 "domain": domain,
                                 "type": cert_type,
-                                "expiry_date": "2027-01-30T00:00:00Z", // TODO: Parse real date
+                                "expiry_date": expiry_date,
                                 "days_remaining": days_remaining,
                                 "status": status
                             }));
@@ -838,25 +908,251 @@ impl FrontendHandler {
             .unwrap()
     }
 
+    /// Parse certificate expiry from PEM string using pure Rust (no cmake deps)
+    fn parse_cert_expiry(pem_str: &str, now_epoch: i64) -> (i64, String) {
+        match pem::parse(pem_str) {
+            Ok(pem_block) => {
+                let der = pem_block.contents();
+                // X.509 DER: SEQUENCE { tbsCertificate SEQUENCE { ... validity SEQUENCE { notBefore, notAfter } } }
+                // Parse notAfter from DER-encoded certificate
+                match Self::extract_not_after_from_der(der) {
+                    Some(not_after_epoch) => {
+                        let remaining = (not_after_epoch - now_epoch) / 86400;
+                        let dt = chrono::DateTime::from_timestamp(not_after_epoch, 0)
+                            .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        (remaining, dt)
+                    }
+                    None => (365, "DER parse error".to_string()),
+                }
+            }
+            Err(_) => (365, "PEM parse error".to_string()),
+        }
+    }
+
+    /// Extract notAfter timestamp from DER-encoded X.509 certificate
+    /// Minimal ASN.1 parser — walks the DER structure to find validity dates
+    fn extract_not_after_from_der(der: &[u8]) -> Option<i64> {
+        // Skip outer SEQUENCE tag+length
+        let inner = Self::skip_asn1_tag_length(der, 0x30)?;
+        // Skip tbsCertificate SEQUENCE tag+length
+        let tbs = Self::skip_asn1_tag_length(inner, 0x30)?;
+        
+        let mut pos = tbs;
+        // Skip version (context tag [0] if present)
+        if !pos.is_empty() && pos[0] == 0xa0 {
+            let (_, rest) = Self::read_asn1_tlv(pos)?;
+            pos = rest;
+        }
+        // Skip serialNumber (INTEGER)
+        let (_, pos) = Self::read_asn1_tlv(pos)?;
+        // Skip signature (SEQUENCE)
+        let (_, pos) = Self::read_asn1_tlv(pos)?;
+        // Skip issuer (SEQUENCE)
+        let (_, pos) = Self::read_asn1_tlv(pos)?;
+        // validity SEQUENCE { notBefore, notAfter }
+        let validity = Self::skip_asn1_tag_length(pos, 0x30)?;
+        // Skip notBefore
+        let (_, after_not_before) = Self::read_asn1_tlv(validity)?;
+        // notAfter is next
+        let (not_after_bytes, _) = Self::read_asn1_tlv(after_not_before)?;
+        
+        // Parse UTCTime or GeneralizedTime
+        let time_str = std::str::from_utf8(not_after_bytes).ok()?;
+        Self::parse_asn1_time(time_str)
+    }
+
+    fn skip_asn1_tag_length(data: &[u8], expected_tag: u8) -> Option<&[u8]> {
+        if data.is_empty() || data[0] != expected_tag {
+            return None;
+        }
+        let (_, _rest) = Self::read_asn1_tlv(data)?;
+        // We need the content, not the rest after. Re-parse to get content.
+        let (content, _) = Self::read_asn1_content(&data[1..])?;
+        Some(content)
+    }
+
+    fn read_asn1_tlv(data: &[u8]) -> Option<(&[u8], &[u8])> {
+        if data.is_empty() {
+            return None;
+        }
+        let (content, rest) = Self::read_asn1_content(&data[1..])?;
+        Some((content, rest))
+    }
+
+    fn read_asn1_content(data: &[u8]) -> Option<(&[u8], &[u8])> {
+        if data.is_empty() {
+            return None;
+        }
+        let (length, header_len) = if data[0] < 0x80 {
+            (data[0] as usize, 1)
+        } else if data[0] == 0x81 {
+            if data.len() < 2 { return None; }
+            (data[1] as usize, 2)
+        } else if data[0] == 0x82 {
+            if data.len() < 3 { return None; }
+            (((data[1] as usize) << 8) | (data[2] as usize), 3)
+        } else if data[0] == 0x83 {
+            if data.len() < 4 { return None; }
+            (((data[1] as usize) << 16) | ((data[2] as usize) << 8) | (data[3] as usize), 4)
+        } else {
+            return None;
+        };
+        
+        let start = header_len;
+        let end = start + length;
+        if end > data.len() {
+            return None;
+        }
+        Some((&data[start..end], &data[end..]))
+    }
+
+    fn parse_asn1_time(s: &str) -> Option<i64> {
+        // UTCTime: YYMMDDHHMMSSZ  or  GeneralizedTime: YYYYMMDDHHMMSSZ
+        let s = s.trim_end_matches('Z');
+        let (year, rest) = if s.len() >= 14 {
+            // GeneralizedTime
+            (s[..4].parse::<i32>().ok()?, &s[4..])
+        } else if s.len() >= 12 {
+            // UTCTime
+            let y: i32 = s[..2].parse().ok()?;
+            let year = if y >= 50 { 1900 + y } else { 2000 + y };
+            (year, &s[2..])
+        } else {
+            return None;
+        };
+        
+        let month: u32 = rest[..2].parse().ok()?;
+        let day: u32 = rest[2..4].parse().ok()?;
+        let hour: u32 = rest[4..6].parse().ok()?;
+        let min: u32 = rest[6..8].parse().ok()?;
+        let sec: u32 = rest[8..10].parse().ok()?;
+        
+        let dt = chrono::NaiveDate::from_ymd_opt(year, month, day)?
+            .and_hms_opt(hour, min, sec)?;
+        Some(dt.and_utc().timestamp())
+    }
+
+    fn is_valid_domain_name(domain: &str) -> bool {
+        if domain.is_empty() || domain.len() > 253 || domain.contains("..") {
+            return false;
+        }
+        if domain
+            .chars()
+            .any(|c| c.is_whitespace() || c == '/' || c == '\\' || c == '\0')
+        {
+            return false;
+        }
+        domain
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+            && domain.contains('.')
+    }
+
+    async fn issue_acme_certificate(&self, domain: &str, email: &str) -> std::result::Result<(), String> {
+        if !Self::is_valid_domain_name(domain) {
+            return Err("Invalid domain format".to_string());
+        }
+        if email.is_empty() {
+            return Err("ACME email is required".to_string());
+        }
+
+        let directory_url = std::env::var("ACME_DIRECTORY_URL")
+            .unwrap_or_else(|_| AcmeClient::letsencrypt_production().to_string());
+
+        let cache_dir = self.config.server.tls.autocert.cache_dir.trim_end_matches('/');
+        let account_key_path = format!("{}/account.key", cache_dir);
+        let acme_client = AcmeClient::new(directory_url, email.to_string(), account_key_path);
+
+        let webroot_path = format!("webroot/{}", domain);
+        let (cert_pem, key_pem) = acme_client
+            .request_certificate(vec![domain.to_string()], &webroot_path)
+            .await
+            .map_err(|e| format!("ACME request failed: {}", e))?;
+
+        let cert_dir = PathBuf::from(&self.config.server.tls.cert_dir);
+        tokio::fs::create_dir_all(&cert_dir)
+            .await
+            .map_err(|e| format!("Failed to create certificate directory: {}", e))?;
+
+        let cert_path = cert_dir.join(format!("{}.pem", domain));
+        let key_path = cert_dir.join(format!("{}.key", domain));
+
+        tokio::fs::write(&cert_path, cert_pem)
+            .await
+            .map_err(|e| format!("Failed to write certificate: {}", e))?;
+        tokio::fs::write(&key_path, key_pem)
+            .await
+            .map_err(|e| format!("Failed to write private key: {}", e))?;
+
+        self.tls_manager
+            .load_certificate(domain, &cert_path, &key_path)
+            .await
+            .map_err(|e| format!("Failed to hot-reload certificate: {}", e))?;
+
+        Ok(())
+    }
+
     /// API endpoint para forçar renovação de certificado
     async fn api_renew_certificate(&self, domain: &str) -> Response<Full<Bytes>> {
         use serde_json::json;
 
-        info!("Force renewal requested for domain: {}", domain);
+        let decoded_domain = match urlencoding::decode(domain) {
+            Ok(value) => value.to_string(),
+            Err(_) => {
+                let response = json!({
+                    "success": false,
+                    "error": "Invalid domain encoding"
+                });
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .header("Content-Type", "application/json")
+                    .body(Full::new(Bytes::from(response.to_string())))
+                    .unwrap();
+            }
+        };
 
-        // TODO: Integrar com AutoRenewalManager
-        // Por agora, retornar sucesso mock
-        let response = json!({
-            "success": true,
-            "domain": domain,
-            "message": format!("Certificate renewal started for {}", domain)
-        });
+        info!("Force renewal requested for domain: {}", decoded_domain);
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(Full::new(Bytes::from(response.to_string())))
-            .unwrap()
+        if !self.config.server.tls.autocert.enabled {
+            let response = json!({
+                "success": false,
+                "error": "Autocert is disabled in configuration"
+            });
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header("Content-Type", "application/json")
+                .body(Full::new(Bytes::from(response.to_string())))
+                .unwrap();
+        }
+
+        let email = self.config.server.tls.autocert.email.trim();
+        match self.issue_acme_certificate(&decoded_domain, email).await {
+            Ok(_) => {
+                let response = json!({
+                    "success": true,
+                    "domain": decoded_domain,
+                    "message": "Certificate renewed successfully"
+                });
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .body(Full::new(Bytes::from(response.to_string())))
+                    .unwrap()
+            }
+            Err(err_msg) => {
+                let response = json!({
+                    "success": false,
+                    "domain": decoded_domain,
+                    "error": err_msg
+                });
+                Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .header("Content-Type", "application/json")
+                    .body(Full::new(Bytes::from(response.to_string())))
+                    .unwrap()
+            }
+        }
     }
 
     /// API endpoint para testar configuração DNS
@@ -866,6 +1162,8 @@ impl FrontendHandler {
     {
         use serde::Deserialize;
         use serde_json::json;
+        use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
+        use trust_dns_resolver::TokioAsyncResolver;
 
         #[derive(Deserialize)]
         struct TestDnsRequest {
@@ -904,24 +1202,51 @@ impl FrontendHandler {
 
         info!("Testing DNS for domain: {}", test_req.domain);
 
-        // Simples verificação DNS (em produção, usar DNS resolver real)
-        // Por agora, aceita qualquer domínio válido
-        let is_valid_domain = test_req.domain.contains('.') && !test_req.domain.contains(' ');
+        if !Self::is_valid_domain_name(&test_req.domain) {
+            let response = json!({
+                "success": false,
+                "error": "Invalid domain format"
+            });
 
-        let response = if is_valid_domain {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header("Content-Type", "application/json")
+                .body(Full::new(Bytes::from(response.to_string())))
+                .unwrap();
+        }
+
+        let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+        let (ipv4_lookup, ipv6_lookup) = tokio::join!(
+            resolver.ipv4_lookup(test_req.domain.as_str()),
+            resolver.ipv6_lookup(test_req.domain.as_str())
+        );
+
+        let ipv4: Vec<String> = ipv4_lookup
+            .ok()
+            .map(|lookup| lookup.iter().map(|ip| ip.to_string()).collect())
+            .unwrap_or_default();
+        let ipv6: Vec<String> = ipv6_lookup
+            .ok()
+            .map(|lookup| lookup.iter().map(|ip| ip.to_string()).collect())
+            .unwrap_or_default();
+
+        let success = !(ipv4.is_empty() && ipv6.is_empty());
+        let response = if success {
             json!({
                 "success": true,
-                "message": format!("DNS configuration looks good for {}", test_req.domain)
+                "message": format!("DNS resolved successfully for {}", test_req.domain),
+                "ipv4": ipv4,
+                "ipv6": ipv6
             })
         } else {
             json!({
                 "success": false,
-                "error": "Invalid domain format"
+                "error": format!("DNS lookup failed for {}", test_req.domain)
             })
         };
 
         Response::builder()
-            .status(StatusCode::OK)
+            .status(if success { StatusCode::OK } else { StatusCode::BAD_GATEWAY })
             .header("Content-Type", "application/json")
             .body(Full::new(Bytes::from(response.to_string())))
             .unwrap()
@@ -988,7 +1313,7 @@ impl FrontendHandler {
                 .unwrap();
         }
 
-        if cert_req.cert_type == "acme" && cert_req.email.is_empty() {
+        if (cert_req.cert_type == "acme" || cert_req.cert_type == "autocert") && cert_req.email.is_empty() {
             let response = json!({
                 "success": false,
                 "error": "Email is required for ACME certificates"
@@ -1000,41 +1325,66 @@ impl FrontendHandler {
                 .unwrap();
         }
 
-        // TODO: Implementar geração real de certificado
-        // Por agora, simula sucesso para ACME
-        if cert_req.cert_type == "acme" {
-            info!("ACME certificate generation would start here for: {}", cert_req.domain);
-            info!("Email for notifications: {}", cert_req.email);
-            
-            // Em produção, aqui chamaríamos:
-            // self.tls_manager.generate_acme_certificate(&cert_req.domain, &cert_req.email).await
-            
-            let response = json!({
-                "success": true,
-                "message": format!("ACME certificate generated for {}. You can now access: https://{}:8443/admin_elite", cert_req.domain, cert_req.domain),
-                "domain": cert_req.domain,
-                "type": "acme"
-            });
+        if cert_req.cert_type == "acme" || cert_req.cert_type == "autocert" {
+            match self.issue_acme_certificate(&cert_req.domain, cert_req.email.trim()).await {
+                Ok(_) => {
+                    let response = json!({
+                        "success": true,
+                        "message": format!("ACME certificate generated for {}", cert_req.domain),
+                        "domain": cert_req.domain,
+                        "type": cert_req.cert_type
+                    });
 
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .body(Full::new(Bytes::from(response.to_string())))
-                .unwrap()
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Full::new(Bytes::from(response.to_string())))
+                        .unwrap()
+                }
+                Err(err_msg) => {
+                    let response = json!({
+                        "success": false,
+                        "error": err_msg,
+                        "domain": cert_req.domain,
+                        "type": cert_req.cert_type
+                    });
+
+                    Response::builder()
+                        .status(StatusCode::BAD_GATEWAY)
+                        .header("Content-Type", "application/json")
+                        .body(Full::new(Bytes::from(response.to_string())))
+                        .unwrap()
+                }
+            }
         } else {
-            // Self-signed
-            let response = json!({
-                "success": true,
-                "message": format!("Self-signed certificate generated for {}", cert_req.domain),
-                "domain": cert_req.domain,
-                "type": "selfsigned"
-            });
+            match self.tls_manager.generate_and_load_cert(&cert_req.domain).await {
+                Ok(_) => {
+                    let response = json!({
+                        "success": true,
+                        "message": format!("Self-signed certificate generated for {}", cert_req.domain),
+                        "domain": cert_req.domain,
+                        "type": "selfsigned"
+                    });
 
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .body(Full::new(Bytes::from(response.to_string())))
-                .unwrap()
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(Full::new(Bytes::from(response.to_string())))
+                        .unwrap()
+                }
+                Err(e) => {
+                    let response = json!({
+                        "success": false,
+                        "error": format!("Failed to generate certificate: {}", e)
+                    });
+
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("Content-Type", "application/json")
+                        .body(Full::new(Bytes::from(response.to_string())))
+                        .unwrap()
+                }
+            }
         }
     }
 }

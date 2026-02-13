@@ -1,8 +1,9 @@
 use crate::error::{Error, Result};
-use crate::stealth::PathSanitizer;
+use crate::stealth::{PathSanitizer, PathType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
@@ -239,12 +240,13 @@ impl Config {
         
         // SECURITY FIX: Sanitize path to prevent traversal attacks
         let canonical_path = PathSanitizer::sanitize_config_path(path_str)?;
-        
-        if !canonical_path.is_file() {
-            return Err(Error::Config("Config path is not a file".to_string()));
-        }
 
-        let content = fs::read_to_string(&canonical_path)
+        PathSanitizer::validate_existing_path(&canonical_path, PathType::File)?;
+
+        let mut file = fs::File::open(&canonical_path)
+            .map_err(|e| Error::Config(format!("Failed to open config file: {}", e)))?;
+        let mut content = String::new();
+        file.read_to_string(&mut content)
             .map_err(|e| Error::Config(format!("Failed to read config file: {}", e)))?;
 
         let config: Config = serde_yaml::from_str(&content)
@@ -257,6 +259,37 @@ impl Config {
         if self.auth.jwt_secret.len() < 32 {
             return Err(Error::Config(
                 "JWT secret must be at least 32 characters".to_string(),
+            ));
+        }
+
+        if self.auth.jwt_secret.to_ascii_uppercase().contains("CHANGE_ME") {
+            return Err(Error::Config(
+                "JWT secret contains placeholder value; set a real production secret".to_string(),
+            ));
+        }
+
+        if self.auth.default_user.trim().is_empty() {
+            return Err(Error::Config(
+                "Default admin username must not be empty".to_string(),
+            ));
+        }
+
+        let default_password = self.auth.default_password.trim();
+        if default_password.is_empty() {
+            return Err(Error::Config(
+                "Default admin password hash must not be empty".to_string(),
+            ));
+        }
+
+        if default_password.to_ascii_uppercase().contains("CHANGE_ME") {
+            return Err(Error::Config(
+                "Default admin password contains placeholder value".to_string(),
+            ));
+        }
+
+        if !default_password.starts_with("$argon2") {
+            return Err(Error::Config(
+                "auth.default_password must be an Argon2 hash (prefix: $argon2)".to_string(),
             ));
         }
 
@@ -331,6 +364,9 @@ mod tests {
                     idle: 120,
                     shutdown: 30,
                 },
+                admin_path: "/admin_elite".to_string(),
+                fake_website_enabled: true,
+                fake_website_type: "construction".to_string(),
             },
             proxy: ProxyConfig {
                 transport: TransportConfig {
@@ -410,7 +446,7 @@ mod tests {
                 refresh_enabled: true,
                 refresh_expiry: 604800,
                 default_user: "admin".to_string(),
-                default_password: "test".to_string(),
+                default_password: "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRmb3J0ZXN0cw$2I9nTR9SZZf5l9S8nR6YlR6GQd4WQ9TtX7YtFQ4Wq0A".to_string(),
             },
             storage: StorageConfig {
                 storage_type: "sled".to_string(),

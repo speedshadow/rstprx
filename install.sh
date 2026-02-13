@@ -3,15 +3,22 @@
 ##############################################################################
 # Elite Rama Proxy - Auto Installer 2026
 # 100% Automated Installation for Production VPS
+#
+# Usage:
+#   sudo bash install.sh              # Interactive install
+#   sudo bash install.sh --uninstall  # Remove everything
+#   sudo bash install.sh --help       # Show help
 ##############################################################################
 
-set -e  # Exit on error
+set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Script directory
@@ -19,40 +26,193 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/rama-proxy"
 SERVICE_USER="rama-proxy"
 ADMIN_PASSWORD=""
+AUTO_MODE=0
+FORCE_REINSTALL=0
+AUTO_DOMAIN=""
+AUTO_ADMIN_PASSWORD=""
+TOTAL_STEPS=14
+CURRENT_STEP=0
 
 ##############################################################################
 # Helper Functions
 ##############################################################################
 
+step() {
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}  Step ${CURRENT_STEP}/${TOTAL_STEPS}: $1${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "  ${BLUE}ℹ${NC}  $1"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "  ${GREEN}✔${NC}  $1"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "  ${YELLOW}⚠${NC}  $1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "  ${RED}✖${NC}  $1"
 }
 
-# Safe sed replacement (works on all systems)
-safe_sed() {
-    local pattern="$1"
-    local replacement="$2"
-    local file="$3"
-    
-    # Try GNU sed first
-    if sed --version >/dev/null 2>&1; then
-        sed -i "s|${pattern}|${replacement}|g" "$file"
-    else
-        # macOS/BSD sed
-        sed -i '' "s|${pattern}|${replacement}|g" "$file"
+ensure_rust_toolchain() {
+    if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck disable=SC1090
+        source "$HOME/.cargo/env"
     fi
+
+    if ! command -v rustc &> /dev/null || ! command -v cargo &> /dev/null; then
+        log_error "Rust toolchain not found (rustc/cargo)."
+        log_info "Install Rust with rustup or distro packages, then re-run installer."
+        exit 1
+    fi
+}
+
+check_existing_installation() {
+    if [ -d "$INSTALL_DIR" ] || [ -f "/etc/systemd/system/rama-proxy.service" ]; then
+        log_warn "Existing installation detected (${INSTALL_DIR} and/or systemd service)."
+
+        if [ "$FORCE_REINSTALL" -eq 1 ] || [ "$AUTO_MODE" -eq 1 ]; then
+            log_warn "Proceeding with reinstall (existing files may be overwritten)."
+            return
+        fi
+
+        echo ""
+        read -p "Continue and overwrite existing installation? [y/N] " overwrite_confirm
+        case "${overwrite_confirm:-N}" in
+            [Yy]*) ;;
+            *)
+                echo "Installation cancelled."
+                exit 0
+                ;;
+        esac
+    fi
+}
+
+# Spinner for long-running commands
+spinner() {
+    local pid=$1
+    local label=$2
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  ${BLUE}${spin:$((i % 10)):1}${NC}  %s..." "$label"
+        i=$((i + 1))
+        sleep 0.2
+    done
+    set +e
+    wait "$pid"
+    local exit_code=$?
+    set -e
+    printf "\r"
+    if [ $exit_code -eq 0 ]; then
+        log_success "$label"
+    else
+        log_error "$label (exit code: $exit_code)"
+        return $exit_code
+    fi
+}
+
+##############################################################################
+# Help & Uninstall
+##############################################################################
+
+show_help() {
+    echo ""
+    echo -e "${BOLD}Elite Rama Proxy — Auto Installer${NC}"
+    echo ""
+    echo "Usage:"
+    echo "  sudo bash install.sh              Interactive installation"
+    echo "  sudo bash install.sh --auto       Non-interactive installation"
+    echo "  sudo bash install.sh --auto --domain proxy.example.com"
+    echo "  sudo bash install.sh --auto --admin-password 'StrongPass123!'"
+    echo "  sudo bash install.sh --auto --force"
+    echo "  sudo bash install.sh --uninstall  Remove proxy and all data"
+    echo "  sudo bash install.sh --help       Show this help"
+    echo ""
+    echo "What the installer does:"
+    echo "  1. Installs system dependencies (curl, git, gcc, pkg-config)"
+    echo "  2. Installs Rust (if not already installed)"
+    echo "  3. Compiles the proxy from source (~5-15 min)"
+    echo "  4. Asks you to set an admin password"
+    echo "  5. Generates SSL certificates (self-signed or for your domain)"
+    echo "  6. Creates a systemd service (auto-start on boot)"
+    echo "  7. Configures firewall rules"
+    echo "  8. Tests that everything works"
+    echo ""
+    echo "After installation:"
+    echo "  Admin panel → https://YOUR_IP:8443/admin_elite/login"
+    echo "  Credentials → /opt/rama-proxy/CREDENTIALS.txt"
+    echo ""
+    echo "Requirements:"
+    echo "  OS: Ubuntu 20+, Debian 11+ (recommended), Fedora 38+, CentOS/RHEL 8+, Rocky, AlmaLinux"
+    echo "  RAM: 2 GB minimum (for Rust compilation)"
+    echo "  Disk: 5 GB free space"
+    echo ""
+    exit 0
+}
+
+uninstall() {
+    echo ""
+    echo -e "${BOLD}${RED}Uninstalling Elite Rama Proxy${NC}"
+    echo ""
+    
+    echo -e "${YELLOW}This will remove:${NC}"
+    echo "  • Systemd service (rama-proxy)"
+    echo "  • Installation directory (${INSTALL_DIR})"
+    echo "  • Service user (${SERVICE_USER})"
+    echo "  • Log rotation config"
+    echo ""
+    read -p "Are you sure? Type YES to confirm: " confirm
+    
+    if [ "$confirm" != "YES" ]; then
+        echo "Uninstall cancelled."
+        exit 0
+    fi
+    
+    echo ""
+    
+    # Stop and disable service
+    if systemctl is-active --quiet rama-proxy 2>/dev/null; then
+        systemctl stop rama-proxy
+        log_success "Service stopped"
+    fi
+    if systemctl is-enabled --quiet rama-proxy 2>/dev/null; then
+        systemctl disable rama-proxy
+        log_success "Service disabled"
+    fi
+    rm -f /etc/systemd/system/rama-proxy.service
+    systemctl daemon-reload 2>/dev/null || true
+    log_success "Systemd service removed"
+    
+    # Remove log rotation
+    rm -f /etc/logrotate.d/rama-proxy
+    log_success "Log rotation config removed"
+    
+    # Remove install directory
+    if [ -d "$INSTALL_DIR" ]; then
+        rm -rf "$INSTALL_DIR"
+        log_success "Installation directory removed: ${INSTALL_DIR}"
+    fi
+    
+    # Remove service user
+    if id "$SERVICE_USER" &>/dev/null; then
+        userdel "$SERVICE_USER" 2>/dev/null || true
+        log_success "Service user removed: ${SERVICE_USER}"
+    fi
+    
+    echo ""
+    log_success "Uninstallation complete."
+    echo ""
+    log_info "Rust toolchain was NOT removed. To remove it: rustup self uninstall"
+    echo ""
+    exit 0
 }
 
 ##############################################################################
@@ -60,8 +220,8 @@ safe_sed() {
 ##############################################################################
 
 detect_os() {
-    log_info "Detecting operating system..."
-    
+    OS_VERSION="unknown"
+
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS=$ID
@@ -72,17 +232,68 @@ detect_os() {
         OS="unknown"
     fi
     
-    log_success "Detected OS: $OS $OS_VERSION"
+    log_success "Detected OS: ${BOLD}$OS $OS_VERSION${NC}"
 }
 
 ##############################################################################
 # Check Root
 ##############################################################################
 
+check_root_simple() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}Error: This script must be run as root${NC}"
+        echo "Run: sudo bash install.sh"
+        exit 1
+    fi
+}
+
 check_root() {
     if [ "$EUID" -ne 0 ]; then
         log_error "This script must be run as root"
-        log_info "Please run: sudo bash install.sh"
+        log_info "Please run: ${BOLD}sudo bash install.sh${NC}"
+        exit 1
+    fi
+}
+
+##############################################################################
+# Pre-flight Checks
+##############################################################################
+
+preflight_checks() {
+    local issues=0
+    
+    # Check RAM (need ~2GB for Rust compilation)
+    local ram_mb
+    ram_mb=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
+    if [ "$ram_mb" -lt 1500 ]; then
+        log_error "Insufficient RAM: ${ram_mb}MB detected, need at least 2GB"
+        log_info "Tip: Add swap space with: fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
+        issues=$((issues + 1))
+    else
+        log_success "RAM: ${ram_mb}MB (OK)"
+    fi
+    
+    # Check available disk space (need ~5GB for compilation)
+    local disk_gb
+    disk_gb=$(df -BG / 2>/dev/null | awk 'NR==2{gsub("G",""); print $4}' || echo "0")
+    if [ "$disk_gb" -lt 5 ]; then
+        log_error "Insufficient disk space: ${disk_gb}GB free, need at least 5GB"
+        issues=$((issues + 1))
+    else
+        log_success "Disk space: ${disk_gb}GB free (OK)"
+    fi
+    
+    # Check internet connectivity
+    if curl -s --connect-timeout 5 https://crates.io > /dev/null 2>&1; then
+        log_success "Internet connectivity (OK)"
+    else
+        log_error "Cannot reach https://crates.io — internet required for installation"
+        issues=$((issues + 1))
+    fi
+    
+    if [ "$issues" -gt 0 ]; then
+        echo ""
+        log_error "$issues pre-flight check(s) failed. Fix the issues above and re-run."
         exit 1
     fi
 }
@@ -92,36 +303,30 @@ check_root() {
 ##############################################################################
 
 install_dependencies() {
-    log_info "Installing system dependencies..."
+    # NOTE: No cmake/clang/openssl-dev needed — we use pure Rust TLS (rustls + ring)
+    # openssl CLI is only used for self-signed cert generation in the installer
     
     case "$OS" in
         ubuntu|debian)
-            apt-get update
-            apt-get install -y \
-                curl \
-                wget \
-                git \
-                build-essential \
-                pkg-config \
-                libssl-dev \
-                ca-certificates \
-                gnupg \
-                lsb-release
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq \
+                curl git build-essential pkg-config \
+                openssl ca-certificates > /dev/null 2>&1
+            ;;
+        fedora)
+            dnf install -y -q \
+                curl git gcc gcc-c++ make pkg-config \
+                openssl ca-certificates > /dev/null 2>&1
             ;;
         centos|rhel|rocky|almalinux)
-            yum install -y \
-                curl \
-                wget \
-                git \
-                gcc \
-                gcc-c++ \
-                make \
-                openssl-devel \
-                pkg-config \
-                ca-certificates
+            yum install -y -q \
+                curl git gcc gcc-c++ make pkg-config \
+                openssl ca-certificates > /dev/null 2>&1
             ;;
         *)
             log_error "Unsupported OS: $OS"
+            log_info "Supported: Ubuntu, Debian, Fedora, CentOS, RHEL, Rocky, AlmaLinux"
             exit 1
             ;;
     esac
@@ -136,14 +341,14 @@ install_dependencies() {
 install_rust() {
     log_info "Installing Rust..."
     
-    if command -v rustc &> /dev/null; then
+    if command -v rustc &> /dev/null && command -v cargo &> /dev/null; then
         log_warn "Rust already installed: $(rustc --version)"
         return
     fi
     
     # Install Rust for root (will be used to compile)
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
+    ensure_rust_toolchain
     
     # Verify installation
     if ! command -v rustc &> /dev/null; then
@@ -174,22 +379,26 @@ create_service_user() {
 ##############################################################################
 
 compile_project() {
-    log_info "Compiling Rama Proxy (this may take a few minutes)..."
+    log_info "This is the slowest step — usually 5-15 minutes depending on your server."
+    log_info "Compilation log: /tmp/rama-compile.log"
     
     cd "$SCRIPT_DIR"
+
+    ensure_rust_toolchain
     
-    # Source Rust environment
-    source "$HOME/.cargo/env"
-    
-    # Build release version
-    cargo build --release
+    # Build release version with spinner (hide cargo noise)
+    cargo build --release > /tmp/rama-compile.log 2>&1 &
+    spinner $! "Compiling (be patient, this takes a while)"
     
     if [ ! -f "target/release/rama-elite-proxy" ]; then
-        log_error "Compilation failed - binary not found"
+        log_error "Compilation failed! Check /tmp/rama-compile.log for details"
+        log_info "Common fix: ensure you have at least 2GB RAM (or add swap)"
         exit 1
     fi
     
-    log_success "Compilation completed successfully"
+    local bin_size
+    bin_size=$(du -h "target/release/rama-elite-proxy" | cut -f1)
+    log_success "Binary compiled: ${bin_size}"
 }
 
 ##############################################################################
@@ -199,6 +408,23 @@ compile_project() {
 generate_admin_password() {
     log_info "Admin password configuration..."
     echo ""
+
+    if [ -n "$AUTO_ADMIN_PASSWORD" ]; then
+        if [ ${#AUTO_ADMIN_PASSWORD} -lt 12 ]; then
+            log_error "--admin-password must be at least 12 characters"
+            exit 1
+        fi
+
+        ADMIN_PASSWORD="$AUTO_ADMIN_PASSWORD"
+        log_success "Admin password set from --admin-password"
+        return
+    fi
+
+    if [ "$AUTO_MODE" -eq 1 ]; then
+        ADMIN_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-20)
+        log_success "Auto mode: random admin password generated"
+        return
+    fi
     
     # Ask user if they want to set custom password
     echo -e "${YELLOW}Choose password option:${NC}"
@@ -250,9 +476,8 @@ generate_admin_password() {
 
 generate_password_hash() {
     log_info "Generating password hash..."
-    
-    # Source Rust environment
-    source "$HOME/.cargo/env"
+
+    ensure_rust_toolchain
     
     cd "$SCRIPT_DIR"
     
@@ -276,7 +501,17 @@ EOF
     fi
     
     # Generate hash
-    PASSWORD_HASH=$(cargo run --example hash_password "$ADMIN_PASSWORD" 2>/dev/null | tail -1)
+    if ! PASSWORD_HASH=$(cargo run --example hash_password -- "$ADMIN_PASSWORD" 2>/tmp/rama-hash.log | tail -1); then
+        log_error "Failed to generate password hash"
+        log_info "Check log: /tmp/rama-hash.log"
+        exit 1
+    fi
+
+    if [[ -z "$PASSWORD_HASH" || "$PASSWORD_HASH" != \$argon2* ]]; then
+        log_error "Generated password hash is invalid"
+        log_info "Check log: /tmp/rama-hash.log"
+        exit 1
+    fi
     
     log_success "Password hash generated"
 }
@@ -324,27 +559,42 @@ setup_install_dir() {
 generate_certificates() {
     log_info "SSL Certificate configuration..."
     echo ""
+    local cert_choice="1"
+    local DOMAIN_NAME=""
     
     # Get server IP
     SERVER_IP=$(hostname -I | awk '{print $1}')
     
     echo -e "${BLUE}Your server IP: ${YELLOW}${SERVER_IP}${NC}"
     echo ""
-    echo -e "${YELLOW}SSL Certificate Options:${NC}"
-    echo "  1) Self-signed for IP address (no domain yet)"
-    echo "  2) Self-signed for domain name (you have a domain)"
-    echo ""
-    echo -e "${GREEN}Note:${NC} You can enable Let's Encrypt (ACME) later in config.yaml"
-    echo ""
-    read -p "Enter choice [1-2]: " cert_choice
+    if [ "$AUTO_MODE" -eq 1 ]; then
+        if [ -n "$AUTO_DOMAIN" ]; then
+            cert_choice="2"
+            DOMAIN_NAME="$AUTO_DOMAIN"
+            log_info "Auto mode: using domain certificate for ${DOMAIN_NAME}"
+        else
+            cert_choice="1"
+            log_info "Auto mode: using IP self-signed certificate"
+        fi
+    else
+        echo -e "${YELLOW}SSL Certificate Options:${NC}"
+        echo "  1) Self-signed for IP address (no domain yet)"
+        echo "  2) Self-signed for domain name (you have a domain)"
+        echo ""
+        echo -e "${GREEN}Note:${NC} You can enable Let's Encrypt (ACME) later in config.yaml"
+        echo ""
+        read -p "Enter choice [1-2]: " cert_choice
+    fi
     
     cd "$INSTALL_DIR/certs"
     
     case "$cert_choice" in
         2)
             # Domain certificate
-            echo ""
-            read -p "Enter your domain (e.g., proxy.example.com): " DOMAIN_NAME
+            if [ -z "$DOMAIN_NAME" ]; then
+                echo ""
+                read -p "Enter your domain (e.g., proxy.example.com): " DOMAIN_NAME
+            fi
             
             if [ -z "$DOMAIN_NAME" ]; then
                 log_error "Domain name cannot be empty"
@@ -469,62 +719,142 @@ server:
     
     autocert:
       enabled: false
-      email: "admin@example.com"
+      domains: []
+      email: ""
       cache_dir: "${INSTALL_DIR}/data/acme-cache"
-      staging: false
     
     ja3_spoofing:
       enabled: true
-      target_fingerprint: "chrome_latest"
+      profile: "random"
+      custom_ja3: ""
+    
+    ja4_spoofing:
+      enabled: true
+      profile: "chrome_120"
   
   timeouts:
     read: 30
     write: 30
     idle: 120
+    shutdown: 30
+
+proxy:
+  transport:
+    max_idle_conns: 2000
+    max_idle_conns_per_host: 100
+    idle_conn_timeout: 90
+    tls_handshake_timeout: 10
+    expect_continue_timeout: 1
+    response_header_timeout: 30
+    dial_timeout: 10
+    keep_alive: 30
+  
+  profiles:
+    enabled: true
+    rotation: "random"
+    browsers:
+      - "chrome_131"
+      - "firefox_133"
+      - "safari_18"
+      - "edge_120"
+  
+  streaming:
+    flush_interval: 1
+    buffer_size: 131072
+    chunk_size: 32768
+  
+  http2:
+    enabled: true
+    akamai_fingerprint: true
+    settings:
+      header_table_size: 65536
+      max_concurrent_streams: 1000
+      initial_window_size: 6291456
+      max_frame_size: 16384
+      max_header_list_size: 262144
+  
+  tcp_fingerprint:
+    enabled: true
+    window_size: 65535
+    ttl: 64
+    mss: 1460
+    window_scale: 8
+    timestamp: true
+    sack_permitted: true
+
+stealth:
+  behavioral_mimicry:
+    enabled: true
+    human_pattern: true
+    min_delay_ms: 50
+    max_delay_ms: 500
+    burst_threshold: 5
+    burst_delay_ms: 2000
+  
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+  
+  remove_headers:
+    - "X-Forwarded-For"
+    - "X-Forwarded-Host"
+    - "X-Forwarded-Proto"
+    - "X-Real-IP"
+    - "Via"
+    - "Forwarded"
+    - "X-Forwarded-Port"
+    - "X-Forwarded-Server"
+    - "X-Original-Forwarded-For"
+    - "CF-Connecting-IP"
+    - "True-Client-IP"
+  
+  header_order:
+    preserve: true
+    chrome_order: true
+
+rate_limit:
+  enabled: true
+  per_ip: 100
+  per_domain: 1000
+  burst: 20
+  cleanup_interval: 300
+
+circuit_breaker:
+  enabled: true
+  max_requests: 5
+  timeout: 60
+  interval: 10
+  failure_threshold: 0.6
 
 auth:
   jwt_secret: "${JWT_SECRET}"
   token_expiry: 86400
+  refresh_enabled: true
+  refresh_expiry: 604800
   default_user: "admin"
   default_password: "${PASSWORD_HASH}"
 
-proxy:
-  max_connections: 10000
-  buffer_size: 8192
-  keep_alive: true
-  
-  rate_limit:
-    enabled: true
-    requests_per_minute: 100
-    burst: 20
-  
-  circuit_breaker:
-    enabled: true
-    failure_threshold: 5
-    timeout: 30
-    half_open_requests: 3
-  
-  behavioral_mimicry:
-    enabled: true
-    base_delay_ms: 10
-    jitter_ms: 5
+storage:
+  type: "sled"
+  path: "${INSTALL_DIR}/data/elite.db"
+  cache_capacity: 1024
 
-stealth:
-  path_sanitization: true
-  header_order_preservation: true
-  http2_fingerprint_mimicry: true
-  websocket_detection: true
+monitoring:
+  prometheus:
+    enabled: true
+    path: "/metrics"
+    auth_required: true
+  
+  tracing:
+    enabled: true
+    level: "info"
+    format: "json"
+    file: "${INSTALL_DIR}/logs/proxy.log"
+    anonymize_ips: true
 
-metrics:
-  enabled: true
-  prometheus_endpoint: "/metrics"
-
-logging:
-  level: "info"
-  format: "json"
-  output: "${INSTALL_DIR}/logs/proxy.log"
-  max_size_mb: 100
-  max_backups: 10
+domains: {}
 EOF
     
     chown "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/config/config.yaml"
@@ -551,7 +881,7 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/bin/rama-elite-proxy
+ExecStart=$INSTALL_DIR/bin/rama-elite-proxy --config $INSTALL_DIR/config/config.yaml
 Restart=always
 RestartSec=10
 StandardOutput=append:$INSTALL_DIR/logs/stdout.log
@@ -563,6 +893,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$INSTALL_DIR/logs $INSTALL_DIR/data $INSTALL_DIR/certs/domains
+ReadWritePaths=$INSTALL_DIR/certs
 
 # Resource limits
 LimitNOFILE=65536
@@ -763,53 +1094,165 @@ print_summary() {
 }
 
 ##############################################################################
+# Setup Log Rotation
+##############################################################################
+
+setup_log_rotation() {
+    cat > /etc/logrotate.d/rama-proxy << EOF
+${INSTALL_DIR}/logs/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 ${SERVICE_USER} ${SERVICE_USER}
+    postrotate
+        systemctl reload rama-proxy > /dev/null 2>&1 || true
+    endscript
+}
+EOF
+    
+    log_success "Log rotation configured (14 days, compressed)"
+}
+
+##############################################################################
 # Main Installation Flow
 ##############################################################################
 
 main() {
     echo ""
+    echo -e "${BOLD}"
     echo "╔═══════════════════════════════════════════════════════════════════╗"
     echo "║                                                                   ║"
-    echo "║            ELITE RAMA PROXY - AUTO INSTALLER 2026                ║"
+    echo "║            ELITE RAMA PROXY — AUTO INSTALLER 2026                ║"
     echo "║                  Production VPS Installation                      ║"
     echo "║                                                                   ║"
     echo "╚═══════════════════════════════════════════════════════════════════╝"
-    echo ""
+    echo -e "${NC}"
     
-    log_info "Starting installation process..."
-    echo ""
-    
-    # Pre-flight checks
     check_root
-    detect_os
+    check_existing_installation
     
-    # Installation steps
+    # Show what will happen
+    echo -e "  This installer will:"
+    echo -e "    1. Install system packages (curl, git, gcc)"
+    echo -e "    2. Install Rust compiler"
+    echo -e "    3. Compile the proxy from source ${YELLOW}(~5-15 min)${NC}"
+    echo -e "    4. Set up admin password + SSL certificates"
+    echo -e "    5. Create a systemd service (auto-start on boot)"
+    echo ""
+    echo -e "  ${BOLD}Install location:${NC} ${INSTALL_DIR}"
+    echo -e "  ${BOLD}Service port:${NC}     8443 (HTTPS)"
+    echo ""
+    
+    if [ "$AUTO_MODE" -eq 1 ]; then
+        log_info "Auto mode enabled: proceeding without interactive confirmation"
+    else
+        read -p "  Continue with installation? [Y/n] " confirm
+        case "${confirm:-Y}" in
+            [Nn]*)
+                echo "Installation cancelled."
+                exit 0
+                ;;
+        esac
+    fi
+    
+    step "Detecting system"
+    detect_os
+    preflight_checks
+    
+    step "Installing system dependencies"
     install_dependencies
+    
+    step "Installing Rust"
     install_rust
+    
+    step "Creating service user"
     create_service_user
+    
+    step "Compiling proxy"
     compile_project
+    
+    step "Setting admin password"
     generate_admin_password
+    
+    step "Generating password hash"
     generate_password_hash
+    
+    step "Generating JWT secret"
     generate_jwt_secret
+    
+    step "Setting up installation directory"
     setup_install_dir
+    
+    step "Generating SSL certificates"
     generate_certificates
+    
+    step "Creating configuration"
     create_config
+    
+    step "Creating systemd service"
     create_systemd_service
+    setup_log_rotation
+    
+    step "Configuring firewall"
     configure_firewall
+    
+    step "Starting service"
     start_service
     
-    # Post-installation
+    step "Testing installation"
     test_installation
     save_credentials
     
     # Summary
     print_summary
-    
-    log_success "Installation completed successfully!"
 }
 
 ##############################################################################
-# Run Main
+# Parse Arguments & Run
 ##############################################################################
 
-main "$@"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            show_help
+            ;;
+        --uninstall)
+            check_root_simple
+            uninstall
+            ;;
+        --auto)
+            AUTO_MODE=1
+            shift
+            ;;
+        --force)
+            FORCE_REINSTALL=1
+            shift
+            ;;
+        --domain)
+            if [ -z "${2:-}" ]; then
+                log_error "--domain requires a value"
+                exit 1
+            fi
+            AUTO_DOMAIN="$2"
+            shift 2
+            ;;
+        --admin-password)
+            if [ -z "${2:-}" ]; then
+                log_error "--admin-password requires a value"
+                exit 1
+            fi
+            AUTO_ADMIN_PASSWORD="$2"
+            shift 2
+            ;;
+        *)
+            log_error "Unknown argument: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+main

@@ -118,6 +118,20 @@ impl CertificateMonitor {
 
     /// Verifica um certificado específico
     async fn check_certificate(&self, cert_path: &Path) -> Result<CertificateInfo> {
+        let canonical_dir = tokio::fs::canonicalize(&self.cert_dir)
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to canonicalize cert dir: {}", e)))?;
+        let canonical_cert = tokio::fs::canonicalize(cert_path)
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to canonicalize cert path: {}", e)))?;
+
+        if !canonical_cert.starts_with(&canonical_dir) {
+            return Err(Error::Security(format!(
+                "Certificate path escapes cert directory: {}",
+                canonical_cert.display()
+            )));
+        }
+
         let domain = cert_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -125,7 +139,7 @@ impl CertificateMonitor {
             .to_string();
 
         // Ler certificado
-        let cert_pem = tokio::fs::read_to_string(cert_path)
+        let cert_pem = tokio::fs::read_to_string(&canonical_cert)
             .await
             .map_err(|e| Error::Internal(format!("Failed to read cert: {}", e)))?;
 
@@ -146,7 +160,7 @@ impl CertificateMonitor {
 
         Ok(CertificateInfo {
             domain: domain.clone(),
-            cert_path: cert_path.to_path_buf(),
+            cert_path: canonical_cert,
             key_path: self.cert_dir.join(format!("{}.key", domain)),
             expiry_date,
             status,
@@ -154,19 +168,18 @@ impl CertificateMonitor {
     }
 
     /// Parse expiry date do certificado PEM
-    /// Implementação simplificada - na produção usar openssl/x509-parser
+    /// Uses real X.509 parsing to extract notAfter
     fn parse_expiry_from_pem(cert_pem: &str) -> Result<DateTime<Utc>> {
-        // TODO: Usar biblioteca de parsing de certificados X.509
-        // Por agora, retornar data fictícia (90 dias no futuro)
-        
-        if cert_pem.contains("PLACEHOLDER") {
-            // Certificado placeholder/self-signed
-            Ok(Utc::now() + chrono::Duration::days(90))
-        } else {
-            // Parse real certificate
-            // Implementar com x509-parser ou openssl
-            Ok(Utc::now() + chrono::Duration::days(90))
-        }
+        use x509_parser::prelude::*;
+
+        let (_, pem) = parse_x509_pem(cert_pem.as_bytes())
+            .map_err(|e| Error::Internal(format!("Failed to parse PEM certificate: {}", e)))?;
+        let (_, cert) = X509Certificate::from_der(&pem.contents)
+            .map_err(|e| Error::Internal(format!("Failed to parse X509 certificate: {}", e)))?;
+
+        let expiry_epoch = cert.validity().not_after.timestamp();
+        DateTime::<Utc>::from_timestamp(expiry_epoch, 0)
+            .ok_or_else(|| Error::Internal("Invalid certificate expiry timestamp".to_string()))
     }
 
     /// Retorna certificados que precisam renovação

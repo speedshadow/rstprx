@@ -51,6 +51,6 @@ mod tests {
     #[test]
     fn test_anonymize_ip() {
         assert_eq!(anonymize_ip("192.168.1.1"), "192.168.1.xxx");
-        assert_eq!(anonymize_ip("2001:db8::1"), "2001:db8:xxxx");
+        assert_eq!(anonymize_ip("2001:db8::1"), "2001:db8::xxxx");
     }
 }

@@ -51,6 +51,7 @@ struct CloudflareError {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CloudflareRecord {
     id: String,
     #[serde(rename = "type")]
@@ -65,17 +66,17 @@ impl CloudflareDns {
     /// # Arguments
     /// * `api_token` - Cloudflare API Token (requer Zone:DNS:Edit)
     /// * `zone_id` - Zone ID do domínio (ex: "abc123...")
-    pub fn new(api_token: String, zone_id: String) -> Self {
+    pub fn new(api_token: String, zone_id: String) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| Error::Internal(format!("Failed to create HTTP client: {}", e)))?;
 
-        Self {
+        Ok(Self {
             api_token,
             zone_id,
             client,
-        }
+        })
     }
 
     /// Obtém API token de variável de ambiente
@@ -86,7 +87,7 @@ impl CloudflareDns {
         let zone_id = std::env::var("CLOUDFLARE_ZONE_ID")
             .map_err(|_| Error::Config("CLOUDFLARE_ZONE_ID not set".to_string()))?;
 
-        Ok(Self::new(api_token, zone_id))
+        Self::new(api_token, zone_id)
     }
 }
 
@@ -116,7 +117,7 @@ impl DnsProvider for CloudflareDns {
             .await
             .map_err(|e| Error::Internal(format!("Cloudflare API request failed: {}", e)))?;
 
-        let status = response.status();
+        let _status = response.status();
         let body: CloudflareResponse<CloudflareRecord> = response
             .json()
             .await
@@ -262,7 +263,8 @@ mod tests {
 
     #[test]
     fn test_cloudflare_creation() {
-        let cf = CloudflareDns::new("test_token".to_string(), "test_zone".to_string());
+        let cf = CloudflareDns::new("test_token".to_string(), "test_zone".to_string())
+            .unwrap();
         assert_eq!(cf.provider_name(), "Cloudflare");
     }
 

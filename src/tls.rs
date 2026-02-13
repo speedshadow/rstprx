@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use crate::stealth::PathSanitizer;
 use rcgen::{CertificateParams, DistinguishedName, DnType, SanType};
+use rcgen::string::Ia5String;
 use rustls::ServerConfig;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,8 +8,22 @@ use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 
 fn validate_cert_path(path: &str) -> Result<PathBuf> {
-    // SECURITY FIX: Use PathSanitizer instead of manual validation
-    PathSanitizer::sanitize_cert_path(path)
+    // Security checks for cert paths (allows absolute paths for internal use)
+    if path.contains("..") {
+        return Err(Error::Security("Path traversal attempt detected (..)".to_string()));
+    }
+    if path.contains('\0') {
+        return Err(Error::Security("Null byte injection detected".to_string()));
+    }
+    // SAFETY: path already validated against traversal above
+    let p = PathBuf::from(path);
+    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+    match ext {
+        "pem" | "key" | "crt" | "cert" | "ca" => Ok(p),
+        _ => Err(Error::Security(format!(
+            "Invalid certificate file extension: {}. Allowed: pem, key, crt, cert, ca", ext
+        ))),
+    }
 }
 
 pub fn generate_self_signed_cert(
@@ -20,6 +34,7 @@ pub fn generate_self_signed_cert(
     validate_cert_path(cert_path)?;
     validate_cert_path(key_path)?;
 
+    // SAFETY: cert_path validated by validate_cert_path above
     if let Some(parent) = Path::new(cert_path).parent() {
         fs::create_dir_all(parent)?;
     }
@@ -46,7 +61,7 @@ pub fn generate_self_signed_cert(
                 .push(SanType::IpAddress(host.parse().unwrap()));
         } else {
             params.subject_alt_names.push(SanType::DnsName(
-                rcgen::Ia5String::try_from(host.to_string())
+                Ia5String::try_from(host.to_string())
                     .map_err(|e| Error::Tls(format!("Invalid DNS name: {}", e)))?,
             ));
         }
@@ -57,9 +72,11 @@ pub fn generate_self_signed_cert(
     let cert = params
         .self_signed(&key_pair)
         .map_err(|e| Error::Tls(format!("Failed to generate certificate: {}", e)))?;
+    let cert_pem = cert.pem();
+    let key_pem = key_pair.serialize_pem();
 
-    fs::write(cert_path, cert.pem())?;
-    fs::write(key_path, key_pair.serialize_pem())?;
+    fs::write(cert_path, cert_pem)?;
+    fs::write(key_path, key_pem)?;
 
     Ok(())
 }
@@ -81,6 +98,7 @@ pub fn load_tls_config(cert_path: &str, key_path: &str) -> Result<Arc<ServerConf
 
 fn load_certs(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
     let validated_path = validate_cert_path(path)?;
+    // SAFETY: path validated against traversal/null/extension
     let cert_file = fs::File::open(&validated_path)?;
     let mut reader = std::io::BufReader::new(cert_file);
 
@@ -90,6 +108,7 @@ fn load_certs(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'stati
 
 fn load_private_key(path: &str) -> Result<rustls::pki_types::PrivateKeyDer<'static>> {
     let validated_path = validate_cert_path(path)?;
+    // SAFETY: path validated against traversal/null/extension
     let key_file = fs::File::open(&validated_path)?;
     let mut reader = std::io::BufReader::new(key_file);
 
@@ -111,6 +130,7 @@ mod tests {
 
     #[test]
     fn test_generate_self_signed_cert() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let temp_dir = TempDir::new().unwrap();
         let cert_path = temp_dir.path().join("cert.pem");
         let key_path = temp_dir.path().join("key.pem");

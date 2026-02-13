@@ -1,6 +1,6 @@
 use crate::auth::AuthManager;
 use crate::error::{Error, Result};
-use http::{Request, StatusCode};
+use http::Request;
 use std::sync::Arc;
 
 /// Session cookie management

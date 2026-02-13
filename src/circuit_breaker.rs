@@ -167,28 +167,28 @@ impl CircuitBreaker {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_circuit_breaker_opens_after_failures() {
+    #[tokio::test]
+    async fn test_circuit_breaker_opens_after_failures() {
         let cb = CircuitBreaker::new(3, 60, 0.6, true);
         let key = "test-service";
 
         for _ in 0..3 {
-            let _ = cb.call(key, || Err::<(), _>(Error::Proxy("test error".to_string())));
+            let _ = cb.call(key, || async { Err::<(), _>(Error::Proxy("test error".to_string())) }).await;
         }
 
         assert_eq!(cb.get_state(key), CircuitState::Open);
 
-        let result = cb.call(key, || Ok(()));
+        let result = cb.call(key, || async { Ok(()) }).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_circuit_breaker_disabled() {
+    #[tokio::test]
+    async fn test_circuit_breaker_disabled() {
         let cb = CircuitBreaker::new(1, 60, 0.6, false);
         let key = "test-service";
 
         for _ in 0..10 {
-            let result = cb.call(key, || Err::<(), _>(Error::Proxy("test error".to_string())));
+            let result = cb.call(key, || async { Err::<(), _>(Error::Proxy("test error".to_string())) }).await;
             assert!(result.is_err());
         }
 

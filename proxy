@@ -1,0 +1,422 @@
+
+
+Perfeito, vou esclarecer tudo sem editar nada! 📝
+
+## 🎯 **Primary Domain (Settings)**
+
+### **Certificado Automático - SIM! ✅**
+
+Quando comprares um domínio (ex: `meudns.com`) e adicionares em **Settings** como Primary Domain:
+
+**✅ Sistema vai:**
+1. Chamar o script Let's Encrypt automaticamente
+2. Gerar certificado válido para `meudns.com`
+3. Substituir o certificado self-signed do IP
+4. **Resultado**: `https://meudns.com:8443` com SSL válido 🔒
+
+**Código que faz isso:** [api_generate_certificate](cci:1://file:///root/CascadeProjects/rstprx/src/frontend.rs:961:4-1070:5) em [frontend.rs](cci:7://file:///root/CascadeProjects/rstprx/src/frontend.rs:0:0-0:0) (linha 963+)
+
+---
+
+## 🌐 **Comportamento do Fake Site**
+
+### **Cenário 1: Acesso por IP (Sem Primary Domain)**
+
+**Atual:**
+- `https://94.103.173.12:8443` → **Fake Site** ✅
+- `https://94.103.173.12:8443/admin_elite/` → **Admin Panel** ✅
+
+**Código:** [frontend.rs](cci:7://file:///root/CascadeProjects/rstprx/src/frontend.rs:0:0-0:0) linha 82-84:
+```rust
+if p == "/" && !self.session_manager.is_authenticated(&req) {
+    return self.page_fake_maintenance(); // ← Mostra fake site
+}
+```
+
+### **Cenário 2: Acesso por Primary Domain (Futuro)**
+
+Quando adicionares `meudns.com` como Primary Domain:
+
+- `https://meudns.com:8443` → **Fake Site** ✅
+- `https://meudns.com:8443/admin_elite/` → **Admin Panel** ✅
+
+**Exatamente o mesmo comportamento!** O domínio só muda o certificado SSL, não o comportamento das rotas.
+
+---
+
+## 🔐 **Como Funciona a Lógica de Routing**
+
+**Ordem de verificação** ([server.rs](cci:7://file:///root/CascadeProjects/rstprx/src/server.rs:0:0-0:0) linha 238-273):
+
+1. **É rota admin?** (`/admin_elite/*`, `/api/*`, `/health`, `/metrics`)
+   - **SIM** → Frontend Handler (admin ou fake site)
+   
+2. **É domínio proxy configurado?** (em `/domains`)
+   - **SIM** → Proxy Handler (reverse proxy para target)
+   - **NÃO** → Frontend Handler (admin ou fake site)
+
+3. **Frontend decide:**
+   - Path = `/` E não autenticado → **Fake Site**
+   - Path = `/admin_elite/*` → **Admin Panel**
+
+---
+
+## 📊 **Diferença Entre Settings e Domains**
+
+### **Settings → Primary Domain**
+- **Função**: Domínio para aceder ao **próprio admin panel**
+- **Exemplo**: `admin.meuprojeto.com`
+- **Acesso**: `https://admin.meuprojeto.com:8443/admin_elite/`
+- **SSL**: Certificado Let's Encrypt para o admin
+- **Fake Site**: Mostra na root (`https://admin.meuprojeto.com:8443/`)
+
+### **Domains → Proxy Domains**
+- **Função**: Domínios que fazem **reverse proxy** para backends
+- **Exemplo**: `api.cliente.com` → `http://backend:3000`
+- **Acesso**: `https://api.cliente.com:8443` → proxia para backend
+- **SSL**: Certificado Let's Encrypt por domínio
+- **Fake Site**: NÃO mostra (vai direto para backend)
+
+---
+
+## 💡 **Resumo Visual**
+
+### **Com Primary Domain**
+```
+https://meudns.com:8443/
+  ├─ / (root)               → Fake Site 🎭
+  └─ /admin_elite/          → Admin Panel 🔐
+
+https://94.103.173.12:8443/
+  ├─ / (root)               → Fake Site 🎭
+  └─ /admin_elite/          → Admin Panel 🔐
+```
+
+### **Com Proxy Domain**
+```
+https://api.cliente.com:8443/
+  └─ Tudo                   → Backend (http://target:3000) 🔄
+```
+
+---
+
+## ✅ **Resposta Direta às Tuas Perguntas**
+
+1. **Primary Domain gera certificado automático?**
+   - **SIM** ✅ (via Let's Encrypt)
+
+2. **IP direto mostra fake site?**
+   - **SIM** ✅ (`https://94.103.173.12:8443/` → Fake Site)
+
+3. **Admin só abre em `/admin_elite/`?**
+   - **SIM** ✅ (path correto)
+
+4. **Com Primary Domain, fake site na root?**
+   - **SIM** ✅ (`https://meudns.com:8443/` → Fake Site)
+   - Admin: `https://meudns.com:8443/admin_elite/` ✅
+
+5. **Primary Domain ≠ Proxy Domains?**
+   - **CORRETO** ✅ (diferentes funcionalidades)
+
+**Está tudo a funcionar exatamente como deve! 🎯**
+
+
+
+O meu conselho de especialista: Não tentes reinventar a roda do proxy (load balancing, connection pooling). Usa o Pingora para isso. Foca 100% do teu tempo em "BoringSSL masquerading". Cria um módulo em Rust que interceta o ClientHello e o reescreve bit-a-bit para ser indistinguível de um fingerprint legítimo (Chrome/Safari/iOS).
+
+Network Stack: QUIC (via quinn ou s2n-quic). O teu proxy tem de falar UDP/QUIC nativamente para emular browsers modernos. IP Stack Fingerprint: Manipula
+
+
+RAMAPROXY>Pingora
+TLS-over-TCP/IP consistency.
+
+
+
+cargo install cargo-outdated
+cargo outdated
+
+
+cargo install cargo-stale
+cargo stale --outdated-only
+
+
+cargo install cargo-edit
+# To see what would be upgraded (dry run)
+cargo upgrade --dry-run
+# To actually update your Cargo.toml
+cargo upgrade
+
+
+
+**Estrutura recomendada para um Reverse Proxy Elite Anónimo em Go (latest 1.25+/1.25 hipotético), com spoofing de JA3/JA4, stealth networking, encriptação forte e suporte a streaming IPTV/XtremeCodes.** Como senior dev com +30 anos (desde C/assembly, passando por todos os stacks web/networking até Go moderno, TLS evasion e high-throughput systems), vou dar-te uma arquitetura prática, escalável e de ponta para 2026. Foco em bypass de fingerprinting (JA3/JA4, JA4H/HTTP2 Akamai, detecção comportamental básica), anonimato (ocultar origem do proxy outbound, headers randômicos) e performance para streaming HLS/TS (muitos concorrentes, baixa latência).
+
+**Aviso importante (legal/ético):** Esta tech é legítima para privacy, corporate proxies, load balancing ou bypass de geo-restrictions em serviços autorizados. Mas usar para IPTV pirata, scraping agressivo ou violar ToS de alvos (Cloudflare, Akamai, provedores IPTV) pode ser ilegal ou contra termos. Fingerprint bypass não é infalível em 2026 (JA4+ suite inclui JA4H, JA4L latency, JA4X certs, JA4T TCP; detecção comportamental + AI/ML em WAFs). Testa sempre com tls.peet.ws/api/all ou ja4.tools. Usa com responsabilidade, rate limiting forte, e não logues IPs de clientes desnecessariamente.
+
+### Arquitetura High-Level (Fluxo)
+- **Cliente** → **Seu domínio/subdomínio** (dns1.mydomain.com ou iptv.mysite.com aponta via DNS A/AAAA para IP do proxy) → **Seu servidor Go (TLS termination inbound)** → **Handler por Host header** → **Custom ReverseProxy** (httputil.ReverseProxy com Director + Transport spoofed) → **Target** (iptvsite.com ou outro) com **TLS client spoofed (uTLS + tls-client)**.
+- Encriptação end-to-end-ish: Inbound TLS 1.3 (Let's Encrypt/autocert, preferencialmente wildcard *.mydomain.com via DNS-01 challenge). Outbound: TLS 1.3 com ClientHello spoofado (ciphers, extensions, order, ALPN h2/http1.1, curves) para matching browser real (Chrome/Firefox latest).
+- Stealth: Spoof JA3/JA4 via browser profiles (tls-client/profiles.Chrome_144 etc.); randomize UA pool + header order (parcial via tls-client); HTTP/2 settings Akamai-like; opção de outbound via SOCKS5/residential proxy pool (tls-client suporta). Rotation de profiles por request/conexão. Evita padrões de scraping (sem delays artificiais excessivos para streaming).
+- Suporte IPTV/XtremeCodes: ReverseProxy transparente funciona bem para .ts segments (chunked, binary, range requests). Para playlists (.m3u/.m3u8) e Xtream API (/get.php, player_api.php, etc.): middleware custom que rewrita URLs embedded (substitui target host por seu domínio + path proxy). Senão, players falham ao seguir segmentos. Inspiração: projetos como pierre-emmanuelJ/iptv-proxy (Go + Gin, rewrites m3u e Xtream).
+
+### Tech Stack (2026-ready)
+- **Go**: 1.24+ (ou 1.25 quando sair) – excelente concurrency (goroutines), net/http otimizado, generics.
+- **Router**: github.com/go-chi/chi/v5 (ou chi host router para virtual hosts).
+- **UI Admin/Dashboard**: github.com/a-h/templ (type-safe templates, componentes reusáveis) + HTMX (dynamic sem SPA heavy: add domain via form hx-post, update table hx-swap). Serve HTMX.js + Tailwind/CSS static. Protege com JWT/basic auth ou OAuth.
+- **Spoofing TLS/ fingerprints**: 
+  - **Recomendado principal**: github.com/juzeon/spoofed-round-tripper (RoundTripper pronto que wrapa tls-client + uTLS; spoofs JA3, JA4, HTTP/2 Akamai de browsers reais como Chrome_120/144, Firefox, Safari).
+  - Alternativa high-level: github.com/bogdanfinn/tls-client (HttpClient com profiles recentes Chrome 144+, Firefox 147+, HTTP/3/QUIC fingerprinting, header order custom, proxy SOCKS5/HTTP, WS).
+  - Base: github.com/refraction-networking/utls (ClientHelloID como HelloChrome_Auto, custom specs).
+- **Config**: github.com/spf13/viper (YAML/JSON/env) ou DB leve (BoltDB/sqlite) para domain mappings: map[string]string { "iptv.mysite.com": "https://target-iptv.com" }.
+- **TLS inbound**: golang.org/x/crypto/acme/autocert (Let's Encrypt wildcard via DNS challenge; ou manual certs).
+- **Outros**: github.com/golang-jwt/jwt (auth admin), sync.Map para cache proxies por target, prometheus/client_golang para metrics (conns, bandwidth para streaming).
+
+### Estrutura de Projeto (padrão limpo Go)
+```
+proxy-elite/
+├── cmd/server/main.go          // entrypoint, server setup, router, TLS
+├── internal/
+│   ├── config/                 // viper load, domain map (in-mem + persist)
+│   ├── proxy/
+│   │   ├── handler.go          // custom ServeHTTP: lookup target por r.Host, build/reuse *httputil.ReverseProxy
+│   │   ├── transport.go        // NewSpoofedTransport() → spoofed-round-tripper ou custom DialTLSContext com uTLS + rotation profiles
+│   │   ├── director.go         // custom Director: rewrite URL, set UA randômico do pool, remove X-Forwarded-*, headers stealth
+│   │   ├── iptv_rewriter.go    // middleware opcional: se .m3u/.m3u8 ou Xtream path, fetch, parse/rewrite URLs para proxy domain
+│   │   └── modify_response.go  // opcional: compress, headers
+│   ├── ui/
+│   │   ├── components/         // .templ files: DomainList, AddDomainForm, Layout, Stats
+│   │   ├── handlers.go         // HTMX endpoints (list domains, add, delete, refresh table)
+│   │   └── templates.go        // templ.Generate + http.Handle
+│   └── auth/                   // JWT middleware para /admin
+├── pkg/
+│   └── utils/                  // UA pool, profile rotator, rate limiter
+├── config.yaml                 // domains, profiles, timeouts, cert paths
+├── go.mod
+└── static/                     // htmx.min.js, tailwind.css
+```
+
+### Componentes Críticos (snippets conceituais)
+1. **Custom Transport (spoofed outbound)**:
+```go
+import (
+    "net/http"
+    srt "github.com/juzeon/spoofed-round-tripper"
+    "github.com/bogdanfinn/tls-client/profiles"
+    // ...
+)
+
+func NewEliteTransport() http.RoundTripper {
+    tr, err := srt.NewSpoofedRoundTripper(
+        tlsclient.WithClientProfile(profiles.Chrome_144), // ou random entre Chrome/Firefox/Safari
+        tlsclient.WithRandomTLSExtensionOrder(),
+        // tlsclient.WithProxyUrl("socks5://residential-proxy:1080"), // para elite anon (rotação pool)
+        tlsclient.WithTimeoutSeconds(30),
+    )
+    // Rotation: func que retorna novo tr com profile randômico por request ou conn
+    return tr
+}
+```
+
+Integra em ReverseProxy: `proxy.Transport = NewEliteTransport()`. Para custom uTLS puro: implementa DialTLSContext com utls.UClient + ClientHelloSpec (ciphers/extensions matching browser JA3/JA4). Testa fingerprint em tls.peet.ws.
+
+2. **ReverseProxy Setup (por target)**:
+```go
+proxy := &httputil.ReverseProxy{
+    Director:  customDirector(targetURL), // reescreve r.URL, Host, UA randômico, etc.
+    Transport: eliteTransport,
+    ModifyResponse: modifyResp, // e.g., remove server headers
+    FlushInterval:  time.Second, // crucial para streaming HLS/TS chunked
+    BufferPool:     newBufferPool(), // performance large responses
+}
+```
+
+- Use sync.Map para cache proxies por target (evita recriar).
+- No handler principal (chi): `if target, ok := config.Domains[r.Host]; ok { proxy.ServeHTTP(w, r) } else { 404 }`.
+
+3. **IPTV/XtremeCodes specifics**:
+- Transparente OK para streams diretos (.ts, low latency em Go).
+- Para playlists/Xtream: Adiciona route/middleware específico. Ex: se r.URL.Path contém .m3u ou /get.php:
+  - Fetch do target (via elite client).
+  - Parse (text para m3u, JSON para Xtream player_api).
+  - Rewrite URLs: replace "https://target-iptv.com/stream.ts" → "https://iptv.mysite.com/proxy/stream?target=..." (ou path mapping).
+  - Serve conteúdo modificado.
+- Veja projetos como iptv-proxy (Go/Gin) ou kptv-proxy para agregação/failover. Para high perf: tune Transport (MaxIdleConnsPerHost: 500+, ConnTimeout baixo), use http2, evite buffering excessivo.
+
+4. **Admin UI (Templ + HTMX)**:
+- Layout.templ com <script src="/static/htmx.min.js"></script>.
+- Componente DomainTable.templ: tabela com hx-get /domains para refresh.
+- Form add: <form hx-post="/admin/domains" hx-swap="outerHTML"> <input subdomain> <input target> → handler atualiza config map, re-render table.
+- Protege /admin/* com auth middleware.
+
+5. **Server Setup (TLS + stealth)**:
+- `http.Server{Handler: router, TLSConfig: autocertConfig}` ou ListenAndServeTLS.
+- Rate limiter (github.com/ulule/limiter) por IP/host.
+- Logging mínimo (zap ou std, anonimizado).
+
+### Otimizações 2026 / Stealth Avançado
+- **JA4/JA4+ bypass**: Browser profiles em tls-client/spoofed dão match aproximado bom (JA4 normaliza extensions; inclui ALPN, SNI, QUIC para HTTP/3 se suportado).
+- **HTTP/2+**: Spoof Akamai settings, header order.
+- **Outros detetores**: Rotate profiles/conns, User-Agent pool (Chrome/Firefox latest), remove fingerprintable headers (Accept-Encoding parcial), outbound via residential/SOCKS pool se latency permitir (streaming sensível).
+- **Performance streaming**: Go nativo excelente (milhares de streams); usa connection reuse, evita per-request allocs pesados. Monitore com pprof/metrics. Scale horizontal (Kubernetes + shared config).
+- **Quantum-ready**: Go 1.24+ tem suporte experimental post-quantum (Kyber/ML-KEM) em crypto; integra em TLSConfig se necessário, mas raro para proxies agora.
+- **Anonimato extra**: Não persistas client IPs; usa ephemeral ports; opcional chain TOR/SOCKS (latência alta para IPTV).
+
+### Próximos Passos / Deploy
+1. `go mod init`, add deps (go get ...).
+2. Implementa config + domain lookup primeiro.
+3. Adiciona transport spoofed + testa com tls.peet.ws.
+4. UI simples com Templ/HTMX.
+5. IPTV rewrites como extra.
+6. Deploy: VPS high-BW (Hetzner/OVH), Docker (multi-stage), Nginx/Cloudflare na frente para extra WAF se inbound precisar, mas evita se quiser stealth puro. Certs wildcard via certbot/LE.
+
+Esta estrutura é robusta, modular e evoluível. Se precisares de snippets mais específicos (e.g., DialTLSContext puro ou rewriter m3u), ou ajustes, dá mais detalhes. Em produção, benchmarka com wrk/ab e testa fingerprints reais. Boa sorte – Go é perfeito para isto!
+
+
+
+✅ Entendido perfeitamente.
+
+### Resumo da tua nova situação:
+- Não tens domínio agora → queres usar **apenas o IP da VPS** (ex: `http://123.45.67.89:8080` ou `https://123.45.67.89:443`)
+- No futuro queres poder adicionar domínio facilmente e ativar SSL real
+- Possível proteção com **Cloudflare Orange Cloud** (proxy mode → esconde IP da VPS)
+
+### Opções recomendadas (2026)
+
+### 1. Configuração Inicial (sem domínio → só IP da VPS)
+
+**Melhor abordagem inicial:**
+- **HTTP puro** (porta 80 ou 8080) → mais simples, sem warnings
+- Ou **HTTPS com certificado self-signed** (porta 443) → evita que alguns players IPTV bloqueiem HTTP
+
+No código Go, fica muito fácil alternar:
+
+```go
+type Config struct {
+    ListenAddr   string   `mapstructure:"listen_addr"`   // ":80" ou ":443"
+    TLSEnabled   bool     `mapstructure:"tls_enabled"`
+    CertFile     string   `mapstructure:"cert_file"`     // opcional
+    KeyFile      string   `mapstructure:"key_file"`      // opcional
+    UseAutocert  bool     `mapstructure:"use_autocert"`  // futuro
+    Domains      []string `mapstructure:"domains"`       // futuro
+}
+```
+
+Mas eu quero que esta opção de para fazer visualmente no frontend ou seja ter configurações no frontend
+
+### Como gerar self-signed cert (se quiseres HTTPS no IP)
+
+```go
+func generateSelfSignedCert() (certPEM, keyPEM []byte, err error) {
+    priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+    template := x509.Certificate{
+        SerialNumber: big.NewInt(1),
+        Subject:      pkix.Name{CommonName: "elite-proxy"},
+        NotBefore:    time.Now(),
+        NotAfter:     time.Now().Add(365 * 24 * time.Hour),
+        KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+        ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+        IPAddresses:  []net.IP{net.ParseIP("0.0.0.0"), net.ParseIP("::")},
+    }
+    derBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+    // codificar para PEM...
+}
+```
+
+Podes guardar como `cert.pem` e `key.pem` e carregar via config.
+
+### 2. Transição futura para domínio + SSL real (fácil)
+
+Quando tiveres domínio (ex: proxy.mydomain.com):
+
+Basta mudar a config:
+```yaml
+listen_addr: ":443"
+tls_enabled: true
+use_autocert: true
+domains: ["proxy.mydomain.com", "*.mydomain.com"]
+```
+
+E no main.go:
+```go
+if cfg.UseAutocert && len(cfg.Domains) > 0 {
+    m := &autocert.Manager{
+        Prompt:     autocert.AcceptTOS,
+        HostPolicy: autocert.HostWhitelist(cfg.Domains...),
+        Cache:      autocert.DirCache("certs"),
+    }
+    server.TLSConfig = m.TLSConfig()
+    // ListenAndServeTLS com m.GetCertificate
+} else if cfg.TLSEnabled {
+    // usa cert.pem + key.pem
+} else {
+    // HTTP puro
+}
+```
+
+### 3. Cloudflare Orange Cloud (proxy mode)
+
+**Vantagens:**
+- Esconde completamente o IP da VPS
+- SSL grátis (Cloudflare termina TLS)
+- Proteção DDoS básica
+
+**Desvantagens importantes (para o teu caso):**
+- O fingerprint JA3/JA4 que o cliente vê passa a ser do **Cloudflare**, não do teu proxy → perde parte do objetivo "elite stealth"
+- Streaming IPTV/XtremeCodes sofre bastante:
+  - Latência extra
+  - Timeouts em streams longos
+  - Limite de bandwidth no plano free
+  - Problemas com Range requests e chunked HLS
+- Só portas 80 e 443 (porta 8080 não funciona em proxy mode)
+
+**Quando vale a pena usar Orange Cloud?**
+- Se a prioridade nº1 for esconder o IP da VPS
+- Se esperas ataques DDoS
+- Se aceitas perder algum stealth inbound
+
+**Como configurar:**
+1. DNS → Cloudflare nameservers
+2. A record: `proxy.mydomain.com` → IP da VPS (proxy laranja ativado)
+3. SSL/TLS → Full (strict) recomendado
+4. No VPS: escuta em porta 443 com self-signed ou real cert (Cloudflare conecta em HTTPS)
+5. Ou modo Flexible (Cloudflare → VPS em HTTP) — menos seguro
+
+### Recomendação final (prioridade stealth + IPTV)
+
+1. **Hoje (sem domínio)** → HTTP na porta 80 ou 8080 no IP da VPS  
+   (mais compatível com players IPTV)
+
+2. **Quando adicionares domínio** → 
+   - Gray Cloud (DNS only) + Let's Encrypt (autocert) → mantém teu fingerprint stealth
+   - Só usa Orange Cloud se realmente precisares esconder o IP
+
+Queres que eu ajuste a estrutura do projeto para suportar estas 3 situações facilmente (HTTP IP / HTTPS self-signed / Autocert)? Posso mostrar o código do server setup mais flexível.
+
+
+Sugestões de melhorias essenciais (prioridade alta → baixa)
+JA4H completo + HTTP/2 Akamai full spoof → Header order exato (não só randômico parcial), pseudo-headers casing, settings frame values (window, max streams, etc.) — tls-client suporta custom; testa em tls.peet.ws ou ja4.tools.
+
+Behavioral mimicry → Para targets críticos: integra Playwright/Chrome headless com stealth plugins (ou hybrid: browser para challenge inicial, depois library). Evita pure HTTP detection.
+ECH (Encrypted Client Hello) → Ativa via Go 1.25 callback quando disponível — esconde SNI.
+PQC hybrid explícito → Força X25519MLKEM768 em Transport (já suportado).
+
+JA4T mitigation → Tuning TCP (window size, timestamps, MSS) se possível (mais avançado, via raw sockets ou syscalls — cuidado com compatibilidade).
+
+Resiliência → Conn reuse alto, timeouts adaptativos, ModifyResponse para remover headers leak (Server, X-Powered-By), compress control.
+
+Auth/Rate/UI → Rate limiter por IP/host (ulule/limiter), JWT forte na UI Templ+HTMX, logging anonimizado (sem client IPs desnecessários).
+
+
+
+
+go list -u -m -f '{{if .Update}}{{.Path}}: {{.Version}} -> {{.Update.Version}}{{end}}' all
+go get -u all
+
+
+https://hub.docker.com/r/renovate/renovate -> verificar dependencias
+
+
+
+
+
+
+

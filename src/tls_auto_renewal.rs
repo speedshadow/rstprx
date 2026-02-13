@@ -173,14 +173,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_auto_renewal_creation() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let temp_dir = TempDir::new().unwrap();
-        let tls_manager = Arc::new(TlsManager::new(
-            temp_dir.path().to_path_buf(),
-            Arc::new(rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(vec![], rustls::pki_types::PrivateKeyDer::Pkcs8(vec![].into()))
-                .unwrap()),
-        ));
+        let cert_path = temp_dir.path().join("default.pem");
+        let key_path = temp_dir.path().join("default.key");
+
+        crate::tls::generate_self_signed_cert(
+            cert_path.to_str().unwrap(),
+            key_path.to_str().unwrap(),
+            vec!["localhost".to_string()],
+        )
+        .unwrap();
+
+        let tls_manager = Arc::new(TlsManager::new(temp_dir.path().to_path_buf()));
+        tls_manager
+            .load_default_certificate(&cert_path, &key_path)
+            .unwrap();
 
         let manager = AutoRenewalManager::new(
             temp_dir.path().to_path_buf(),

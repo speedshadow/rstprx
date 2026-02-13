@@ -4,21 +4,22 @@ use crate::error::{Error, Result};
 use crate::stealth::PathSanitizer;
 use crate::frontend::FrontendHandler;
 use crate::metrics::MetricsCollector;
-use crate::proxy::ProxyHandler;
+use crate::proxy::{ProxyHandler, handler::ResponseBody};
 use crate::storage::Storage;
 use crate::tls::{generate_self_signed_cert, load_tls_config};
 use crate::tls_manager::TlsManager;
 use bytes::Bytes;
 use http::{Request, Response};
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::Semaphore;
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info, warn};
 
@@ -56,31 +57,25 @@ impl Server {
             metrics.clone(),
         )?);
 
-        // Inicializar TLS Manager
-        let default_tls_config = if config.server.tls.enabled {
-            Self::setup_tls_config(&config).await?
-        } else {
-            Arc::new(
-                rustls::ServerConfig::builder()
-                    .with_no_client_auth()
-                    .with_single_cert(
-                        vec![],
-                        rustls::pki_types::PrivateKeyDer::Pkcs8(vec![].into()),
-                    )
-                    .unwrap(),
-            )
-        };
+        // SECURITY FIX: Sanitize cert_dir path and create it if missing
+        let cert_dir = PathSanitizer::sanitize_or_create_dir(&config.server.tls.cert_dir)?;
 
-        // SECURITY FIX: Sanitize cert_dir path
-        let cert_dir = PathSanitizer::sanitize(&config.server.tls.cert_dir)?;
-        
-        let tls_manager = Arc::new(TlsManager::new(
-            cert_dir,
-            default_tls_config,
-        ));
+        let tls_manager = Arc::new(TlsManager::new(cert_dir));
+
+        if config.server.tls.enabled {
+            Self::ensure_tls_material(&config).await?;
+            let cert_path = PathSanitizer::sanitize_cert_path(&config.server.tls.cert_file)?;
+            let key_path = PathSanitizer::sanitize_cert_path(&config.server.tls.key_file)?;
+            tls_manager.load_default_certificate(
+                &cert_path,
+                &key_path,
+            )?;
+        }
 
         // Carregar certificados existentes
-        tls_manager.load_all_existing_certs().await.ok();
+        if let Err(e) = tls_manager.load_all_existing_certs().await {
+            warn!("Failed to pre-load existing TLS certificates: {}", e);
+        }
 
         let frontend_handler = Arc::new(FrontendHandler::new(
             Arc::new(config.clone()),
@@ -120,8 +115,10 @@ impl Server {
     }
 
     async fn run_tls(self, listener: TcpListener) -> Result<()> {
-        let tls_config = self.setup_tls().await?;
+        let tls_config = self.tls_manager.build_server_config()?;
         let acceptor = TlsAcceptor::from(tls_config);
+        let max_connections = self.config.proxy.transport.max_idle_conns.max(100);
+        let connection_limiter = Arc::new(Semaphore::new(max_connections));
 
         info!("TLS server ready, accepting connections");
 
@@ -132,10 +129,18 @@ impl Server {
                 result = listener.accept() => {
                     match result {
                         Ok((stream, peer_addr)) => {
+                            let permit = match connection_limiter.clone().try_acquire_owned() {
+                                Ok(permit) => permit,
+                                Err(_) => {
+                                    warn!("Connection limit reached ({}), dropping incoming TLS connection", max_connections);
+                                    continue;
+                                }
+                            };
                             let acceptor = acceptor.clone();
                             let server = server.clone();
 
                             tokio::spawn(async move {
+                                let _permit = permit;
                                 match acceptor.accept(stream).await {
                                     Ok(tls_stream) => {
                                         let io = TokioIo::new(tls_stream);
@@ -177,6 +182,8 @@ impl Server {
 
     async fn run_http(self, listener: TcpListener) -> Result<()> {
         info!("HTTP server ready, accepting connections");
+        let max_connections = self.config.proxy.transport.max_idle_conns.max(100);
+        let connection_limiter = Arc::new(Semaphore::new(max_connections));
 
         let server = Arc::new(self);
 
@@ -185,10 +192,18 @@ impl Server {
                 result = listener.accept() => {
                     match result {
                         Ok((stream, peer_addr)) => {
+                            let permit = match connection_limiter.clone().try_acquire_owned() {
+                                Ok(permit) => permit,
+                                Err(_) => {
+                                    warn!("Connection limit reached ({}), dropping incoming HTTP connection", max_connections);
+                                    continue;
+                                }
+                            };
                             let server = server.clone();
                             let io = TokioIo::new(stream);
 
                             tokio::spawn(async move {
+                                let _permit = permit;
                                 let service = service_fn(move |req: Request<Incoming>| {
                                     let server = server.clone();
                                     async move {
@@ -223,8 +238,12 @@ impl Server {
         &self,
         req: Request<Incoming>,
         peer_addr: SocketAddr,
-    ) -> std::result::Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    ) -> std::result::Result<Response<ResponseBody>, std::convert::Infallible> {
         let path = req.uri().path();
+
+        if path.starts_with("/.well-known/acme-challenge/") {
+            return Ok(self.serve_acme_challenge(&req).await);
+        }
         
         // Normalizar path: remover trailing slash exceto root
         let normalized_path = if path.len() > 1 && path.ends_with('/') {
@@ -234,83 +253,130 @@ impl Server {
         };
 
         let admin_path = &self.config.server.admin_path;
+        let metrics_path = self.config.monitoring.prometheus.path.as_str();
 
         if normalized_path.starts_with(admin_path)
             || normalized_path.starts_with("/api")
             || normalized_path == "/health"
-            || normalized_path == "/metrics"
+            || normalized_path == metrics_path
             || normalized_path == "/logout"
             || normalized_path == "/"  // Root path goes to frontend (fake website or dashboard)
         {
-            Ok(self.frontend_handler.handle(req).await)
+            // Convert Full<Bytes> from frontend to ResponseBody
+            let resp = self.frontend_handler.handle(req).await;
+            Ok(resp.map(|b| b.map_err(|never| match never {}).boxed()))
         } else {
             match self.proxy_handler.handle_request(req, peer_addr).await {
                 Ok(response) => Ok(response),
                 Err(e) => {
                     error!("Proxy error: {}", e);
+                    // STEALTH: Return generic nginx-like error, never reveal proxy identity
                     Ok(Response::builder()
-                        .status(http::StatusCode::BAD_GATEWAY)
-                        .body(Full::new(Bytes::from("Bad Gateway")))
+                        .status(http::StatusCode::NOT_FOUND)
+                        .header(http::header::SERVER, "nginx/1.24.0")
+                        .header(http::header::CONTENT_TYPE, "text/html")
+                        .body(Full::new(Bytes::from(
+                            "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.24.0</center>\r\n</body>\r\n</html>\r\n"
+                        )).map_err(|never| match never {}).boxed())
                         .unwrap())
                 }
             }
         }
     }
 
-    async fn setup_tls_config(config: &Config) -> Result<Arc<rustls::ServerConfig>> {
-        // SECURITY FIX: Sanitize cert paths
-        let cert_path_sanitized = PathSanitizer::sanitize_cert_path(&config.server.tls.cert_file)?;
-        let key_path_sanitized = PathSanitizer::sanitize_cert_path(&config.server.tls.key_file)?;
-        
+    async fn serve_acme_challenge(&self, req: &Request<Incoming>) -> Response<ResponseBody> {
+        let host = req
+            .headers()
+            .get(http::header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .map(|h| h.split(':').next().unwrap_or(h).to_string())
+            .unwrap_or_default();
+
+        let token = req
+            .uri()
+            .path()
+            .trim_start_matches("/.well-known/acme-challenge/");
+
+        let valid_host = !host.is_empty()
+            && !host.contains("..")
+            && !host.contains('/')
+            && !host.contains('\\')
+            && !host.chars().any(|c| c.is_whitespace() || c == '\0');
+
+        let valid_token = !token.is_empty()
+            && token
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+
+        if !valid_host || !valid_token {
+            return Response::builder()
+                .status(http::StatusCode::NOT_FOUND)
+                .header(http::header::SERVER, "nginx/1.24.0")
+                .header(http::header::CONTENT_TYPE, "text/plain")
+                .body(Full::new(Bytes::from("Not Found")).map_err(|never| match never {}).boxed())
+                .unwrap();
+        }
+
+        let challenge_path = PathBuf::from("webroot")
+            .join(&host)
+            .join(".well-known")
+            .join("acme-challenge")
+            .join(token);
+
+        match tokio::fs::read(challenge_path).await {
+            Ok(content) => Response::builder()
+                .status(http::StatusCode::OK)
+                .header(http::header::SERVER, "nginx/1.24.0")
+                .header(http::header::CONTENT_TYPE, "text/plain")
+                .body(Full::new(Bytes::from(content)).map_err(|never| match never {}).boxed())
+                .unwrap(),
+            Err(_) => Response::builder()
+                .status(http::StatusCode::NOT_FOUND)
+                .header(http::header::SERVER, "nginx/1.24.0")
+                .header(http::header::CONTENT_TYPE, "text/plain")
+                .body(Full::new(Bytes::from("Not Found")).map_err(|never| match never {}).boxed())
+                .unwrap(),
+        }
+    }
+
+    async fn ensure_tls_material(config: &Config) -> Result<()> {
         let cert_path = &config.server.tls.cert_file;
         let key_path = &config.server.tls.key_file;
 
-        if !cert_path_sanitized.exists() || !key_path_sanitized.exists() {
-            if config.server.tls.mode == "selfsigned" {
-                info!("Generating self-signed certificate");
-                generate_self_signed_cert(
-                    cert_path,
-                    key_path,
-                    config.server.tls.selfsigned_hosts.clone(),
-                )?;
-                info!("Self-signed certificate generated successfully");
-            } else {
+        if cert_path.contains("..") || key_path.contains("..") || cert_path.contains('\0') || key_path.contains('\0') {
+            return Err(Error::Security("Invalid certificate path".to_string()));
+        }
+
+        let cert_exists = PathSanitizer::sanitize_cert_path(cert_path).is_ok();
+        let key_exists = PathSanitizer::sanitize_cert_path(key_path).is_ok();
+
+        if !cert_exists || !key_exists {
+            let can_bootstrap_selfsigned = config.server.tls.mode == "selfsigned"
+                || (config.server.tls.mode == "autocert" && config.server.tls.autocert.enabled);
+            if !can_bootstrap_selfsigned {
                 return Err(Error::Tls(format!(
-                    "Certificate files not found and mode is not selfsigned: {} / {}",
+                    "Certificate files not found and mode cannot bootstrap TLS materials: {} / {}",
                     cert_path, key_path
                 )));
             }
+
+            info!("Generating self-signed bootstrap certificate");
+            let hosts = if config.server.tls.selfsigned_hosts.is_empty() {
+                vec!["localhost".to_string(), "127.0.0.1".to_string()]
+            } else {
+                config.server.tls.selfsigned_hosts.clone()
+            };
+            generate_self_signed_cert(cert_path, key_path, hosts)?;
+            info!("Bootstrap certificate generated successfully");
         }
 
-        load_tls_config(cert_path, key_path)
-    }
+        // SECURITY FIX: Sanitize cert paths after files exist
+        let _ = PathSanitizer::sanitize_cert_path(cert_path)?;
+        let _ = PathSanitizer::sanitize_cert_path(key_path)?;
 
-    async fn setup_tls(&self) -> Result<Arc<rustls::ServerConfig>> {
-        let cert_path = &self.config.server.tls.cert_file;
-        let key_path = &self.config.server.tls.key_file;
-
-        match self.config.server.tls.mode.as_str() {
-            "selfsigned" => {
-                if !Path::new(cert_path).exists() {
-                    info!("Generating self-signed certificate");
-                    let hosts = if self.config.server.tls.selfsigned_hosts.is_empty() {
-                        vec!["localhost".to_string(), "127.0.0.1".to_string()]
-                    } else {
-                        self.config.server.tls.selfsigned_hosts.clone()
-                    };
-
-                    generate_self_signed_cert(cert_path, key_path, hosts)?;
-                    info!("Self-signed certificate generated successfully");
-                }
-
-                load_tls_config(cert_path, key_path)
-            }
-            "autocert" => {
-                warn!("Autocert not yet implemented, falling back to self-signed");
-                Box::pin(self.setup_tls()).await
-            }
-            _ => load_tls_config(cert_path, key_path),
-        }
+        // Validate certificate and key are loadable
+        let _ = load_tls_config(cert_path, key_path)?;
+        Ok(())
     }
 }
 

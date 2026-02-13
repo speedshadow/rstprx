@@ -93,8 +93,7 @@ impl ExtensionRandomizer {
 
     /// Adiciona jitter temporal à ordem (micro-delays)
     pub async fn apply_temporal_jitter() {
-        let mut rng = rand::thread_rng();
-        let jitter_us = rng.gen_range(0..100); // 0-100 microseconds
+        let jitter_us = rand::thread_rng().gen_range(0..100); // 0-100 microseconds
         tokio::time::sleep(tokio::time::Duration::from_micros(jitter_us)).await;
     }
 }
@@ -106,6 +105,12 @@ pub struct Ja3Builder {
     extensions: Vec<u16>,
     curves: Vec<u16>,
     ec_point_formats: Vec<u8>,
+}
+
+impl Default for Ja3Builder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Ja3Builder {
@@ -175,7 +180,14 @@ impl Ja3Builder {
     pub fn build_ja4_plus(&self) -> String {
         use sha2::{Sha256, Digest};
 
-        let protocol = format!("t{:02x}", self.tls_version);
+        let ver = match self.tls_version {
+            0x0304 => "13",
+            0x0303 => "12",
+            0x0302 => "11",
+            0x0301 => "10",
+            _ => "00",
+        };
+        let protocol = format!("t{}", ver);
 
         // Hash de cipher suites
         let ciphers_hash = {
@@ -279,7 +291,7 @@ mod tests {
         let ja4 = builder.build_ja4_plus();
         
         // Formato: t{version}_{hash1}_{hash2}
-        assert!(ja4.starts_with("t03"));
+        assert!(ja4.starts_with("t12"));
         assert_eq!(ja4.matches('_').count(), 2);
     }
 }

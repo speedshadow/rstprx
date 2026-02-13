@@ -1,0 +1,83 @@
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: use crate::key_pair::{serialize_public_key_der, sign_der, PublicKeyData};
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: pub fn pem(&self) -> String {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: /// The returned [`Certificate`] may be serialized using [`Certificate::der`] and
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: der: self.serialize_der_with_signer(public_key, issuer)?,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: /// The returned [`Certificate`] may be serialized using [`Certificate::der`] and
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: der: self.serialize_der_with_signer(signing_key, &issuer)?,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: /// Generate and serialize a certificate signing request (CSR).
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: /// Note that subsequent invocations of `serialize_request()` will not produce the exact
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: pub fn serialize_request(
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: self.serialize_request_with_attributes(subject_key, Vec::new())
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: /// Generate and serialize a certificate signing request (CSR) with custom PKCS #10 attributes.
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: /// Note that subsequent invocations of `serialize_request_with_attributes()` will not produce the exact
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: pub fn serialize_request_with_attributes(
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: serialize_public_key_der(subject_key, writer.next());
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: pub(crate) fn serialize_der_with_signer<K: PublicKeyData>(
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: serialize_public_key_der(pub_key, writer.next());
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: // Create and serialize a certificate with an alternative name containing an "OtherName".
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/certificate.rs: // Create and serialize a certificate with a subject containing an IA5String email address.
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/crl.rs: pub fn pem(&self) -> Result<String, Error> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/crl.rs: der: self.serialize_der(issuer)?.into(),
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/crl.rs: fn serialize_der(&self, issuer: &Issuer<'_, impl SigningKey>) -> Result<Vec<u8>, Error> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/csr.rs: pub fn pem(&self) -> Result<String, Error> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/csr.rs: pub fn from_pem(pem_str: &str) -> Result<Self, Error> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/csr.rs: /// The returned [`Certificate`] may be serialized using [`Certificate::der`] and
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/csr.rs: .serialize_der_with_signer(&self.public_key, issuer)?,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/csr.rs: let csr = params.serialize_request(&key_pair).unwrap();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/csr.rs: let csr = params.serialize_request(&key_pair).unwrap();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub(crate) serialized_der: Vec<u8>,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: .field("serialized_der", &"[secret key elided]")
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let key_pair_serialized = key_pair_doc.as_ref().to_vec();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: serialized_der: key_pair_serialized,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let key_pair_serialized = key_pair_doc.as_ref().to_vec();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: serialized_der: key_pair_serialized,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let key_pair_serialized = key_pair.to_pkcs8()._err()?.as_ref().to_vec();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: serialized_der: key_pair_serialized,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let key_pair_serialized = key_pair.as_der()._err()?.as_ref().to_vec();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: serialized_der: key_pair_serialized,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn from_pem(pem_str: &str) -> Result<Self, Error> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn from_pkcs8_pem_and_sign_algo(
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let serialized_der = pkcs8.secret_pkcs8_der().to_vec();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: KeyPairKind::Ed(Ed25519KeyPair::from_pkcs8_maybe_unchecked(&serialized_der)._err()?)
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = RsaKeyPair::from_pkcs8(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = RsaKeyPair::from_pkcs8(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = RsaKeyPair::from_pkcs8(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = RsaKeyPair::from_pkcs8(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn from_pem_and_sign_algo(
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let serialized_der = key.secret_der().to_vec();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: KeyPairKind::Ed(Ed25519KeyPair::from_pkcs8_maybe_unchecked(&serialized_der)._err()?)
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = rsa_key_pair_from(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = rsa_key_pair_from(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = rsa_key_pair_from(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let rsakp = rsa_key_pair_from(&serialized_der)._err()?;
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: serialized_der,
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn public_key_pem(&self) -> String {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn serialize_der(&self) -> Vec<u8> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: self.serialized_der.clone()
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: /// Returns a reference to the serialized key pair (including the private key)
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn serialized_der(&self) -> &[u8] {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: &self.serialized_der
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn serialize_pem(&self) -> String {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: let contents = self.serialize_der();
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: serialized_der: key.secret_der().into(),
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: val.serialize_der().into()
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub fn from_pem(pem_str: &str) -> Result<Self, Error> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: yasna::construct_der(|writer| serialize_public_key_der(self, writer))
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/key_pair.rs: pub(crate) fn serialize_public_key_der(key: &(impl PublicKeyData + ?Sized), writer: DERWriter) {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: println!("{}", signing_key.serialize_pem());
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: println!("{}", signing_key.serialize_pem());
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: pub fn pem(&self) -> String {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: pub fn from_ca_cert_pem(pem_str: &str, signing_key: S) -> Result<Self, Error> {
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: // This is needed because the GeneralizedTime serializer would otherwise
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: value_serializer: impl FnOnce(DERWriter),
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: let bytes = yasna::construct_der(value_serializer);
+/home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rcgen-0.14.7/src/lib.rs: self.serialized_der.zeroize();

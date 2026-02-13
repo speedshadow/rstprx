@@ -9,7 +9,7 @@ license = "MIT"
 
 [dependencies]
 # Rama framework - 0.3.0-alpha.4 (2026) - rustls only (no cmake needed)
-rama = { version = "0.3.0-alpha.4", features = [
+rama = { version = "0.3.0-alpha.4", default-features = false, features = [
     "http-full",
     "tcp",
     "rustls",
@@ -28,11 +28,13 @@ http-body-util = "0.1"
 tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["full"] }
 
-# TLS & Crypto (Rustls - pure Rust)
-rustls = { version = "0.23", features = ["ring", "std"] }
+# TLS & Crypto (Rustls - pure Rust, ring only, NO cmake/aws-lc)
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2.2"
-tokio-rustls = "0.26"
-rcgen = "0.13"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "ring", "tls12", "logging", "webpki-roots"] }
+webpki-roots = "0.26"
+rcgen = { version = "0.14", default-features = false, features = ["pem", "ring"] }
 time = { version = "0.3", features = ["formatting", "macros"] }
 
 # Serialization
@@ -42,7 +44,7 @@ serde_yaml = "0.9"
 toml = "0.8"
 
 # Authentication & Security
-jsonwebtoken = "10.3"
+jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
 argon2 = { version = "0.5", features = ["std"] }
 sha1 = "0.10"
 sha2 = "0.10"
@@ -50,6 +52,7 @@ hmac = "0.12"
 base64 = "0.22"
 hex = "0.4"
 rand = "0.8"
+ring = { version = "0.17", features = ["std"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
 
 # Database
@@ -86,8 +89,10 @@ nonzero_ext = "0.3"
 # Regex & Parsing
 regex = "1.11"
 url = "2.5"
+pem = "3.0"
 mime = "0.3"
 mime_guess = "2.0"
+x509-parser = "0.16"
 
 # Utilities (aligned with Rama utils)
 futures = "0.3"
@@ -105,6 +110,7 @@ fake-useragent = "0.1"
 criterion = "0.5"
 mockito = "1.5"
 proptest = "1.5"
+tempfile = "3.10"
 
 [profile.release]
 opt-level = 3
